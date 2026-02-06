@@ -6,5 +6,13 @@
     "choiceId": "cand-a",
     "auditHash": "0xaGktY2FuZC1hLTE3...MzE3NTc=",
     "castAt": "2026-02-06T12:40:31.947Z"
+  },
+  {
+    "id": "vote_1770387902440_5ceba217ee2e88",
+    "electionId": "society-chairperson-2026",
+    "encryptedBallot": "0xY2FuZC1i...IwNQ==",
+    "choiceId": "cand-b",
+    "auditHash": "0xc3VpaS1jYW5kLWIt...MjM5OA==",
+    "castAt": "2026-02-06T14:25:02.440Z"
   }
 ]
