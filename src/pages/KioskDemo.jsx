@@ -30,7 +30,7 @@ const KioskDemo = () => {
   const [ballotHash, setBallotHash] = useState("");
   const [ballotId, setBallotId] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(""); // new: error banner
+  const [error, setError] = useState("");
 
   const cipherText = useMemo(
     () => fakeCipher(selected ? selected.id : ""),
@@ -344,11 +344,104 @@ const KioskDemo = () => {
             )}
           </>
         ) : (
-          // Vote Receipt with QR Code
+          /* Vote Receipt with QR Code */
           <div className="card card-hover animate-scale-in">
-            {/* (receipt block same as your original) */}
-            {/* ...existing receipt JSX unchanged... */}
-            {/* For brevity you can keep the same code you already have here */}
+            <div
+              style={{
+                padding: 12,
+                borderRadius: 12,
+                backgroundColor: "rgba(34, 197, 94, 0.1)",
+                border: "1px solid rgba(34, 197, 94, 0.5)",
+                marginBottom: 16,
+                textAlign: "center",
+              }}
+            >
+              <h3 style={{ fontSize: 18, color: "#22c55e", marginBottom: 4 }}>
+                ✓ Vote Successfully Cast
+              </h3>
+              <p className="text-muted" style={{ fontSize: 13 }}>
+                Your vote has been encrypted and submitted successfully
+                (VoteSphere demo).
+              </p>
+            </div>
+
+            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+              📄 Vote Receipt
+            </h3>
+            <p className="text-muted" style={{ fontSize: 12, marginBottom: 12 }}>
+              Save this receipt for your records. You can use the Ballot ID to
+              verify your vote was counted on the Public Audit page.
+            </p>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr auto",
+                gap: 16,
+                alignItems: "start",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontFamily: "monospace",
+                    fontSize: 12,
+                    backgroundColor: "rgba(15,23,42,0.96)",
+                                        borderRadius: 12,
+                    padding: 12,
+                    border: "1px solid rgba(148,163,184,0.5)",
+                  }}
+                >
+                  <div style={{ marginBottom: 6 }}>
+                    <span style={{ color: "#a5b4fc" }}>Ballot ID:</span>{" "}
+                    <span style={{ color: "#22c55e" }}>{ballotId}</span>
+                  </div>
+                  <div style={{ marginBottom: 6 }}>
+                    <span style={{ color: "#a5b4fc" }}>Voter Receipt Hash:</span>
+                  </div>
+                  <div style={{ color: "#22c55e", wordBreak: "break-all" }}>
+                    {ballotHash}
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 11, color: "#9ca3af" }}>
+                    Timestamp: {new Date().toLocaleString("en-IN")}
+                  </div>
+                </div>
+                <p className="text-muted" style={{ fontSize: 11, marginTop: 10 }}>
+                  <strong>Voter‑Verifiable Audit:</strong> You can later verify your
+                  ballot was counted by checking this hash in the public audit portal,
+                  without revealing your vote choice.
+                </p>
+              </div>
+
+              <div
+                style={{
+                  padding: 12,
+                  backgroundColor: "#fff",
+                  borderRadius: 12,
+                  border: "2px solid rgba(148,163,184,0.5)",
+                }}
+              >
+                <QRCodeSVG value={ballotHash} size={120} />
+                <p
+                  style={{
+                    fontSize: 10,
+                    color: "#666",
+                    marginTop: 6,
+                    textAlign: "center",
+                  }}
+                >
+                  Scan to verify
+                </p>
+              </div>
+            </div>
+
+            <button
+              className="btn btn-outline"
+              style={{ marginTop: 16, width: "100%" }}
+              onClick={() => window.location.reload()}
+            >
+              Return to Kiosk Home
+            </button>
           </div>
         )}
       </div>
@@ -357,3 +450,4 @@ const KioskDemo = () => {
 };
 
 export default KioskDemo;
+
