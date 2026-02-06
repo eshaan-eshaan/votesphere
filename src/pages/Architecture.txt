@@ -1,0 +1,15 @@
+import React from "react";
+import { useLanguage } from "../components/LanguageContext.jsx";
+
+const Architecture = () => {
+  const { t } = useLanguage();
+
+  return (
+    <div className="page animate-fade-in">
+      <div className="container">
+        <div className="section-header">
+          <div className="badge badge-primary mb-2">
+            System Design • Tech Stack
+          </div>
+          <h2 className="section-title">System Architecture & Tech Stack</h2>
+          

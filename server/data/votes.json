@@ -1,0 +1,10 @@
+[
+  {
+    "id": "vote_1770381631947_af2ab66fa9155",
+    "electionId": "society-chairperson-2026",
+    "encryptedBallot": "0xY2FuZC1h...MzOA==",
+    "choiceId": "cand-a",
+    "auditHash": "0xaGktY2FuZC1hLTE3...MzE3NTc=",
+    "castAt": "2026-02-06T12:40:31.947Z"
+  }
+]

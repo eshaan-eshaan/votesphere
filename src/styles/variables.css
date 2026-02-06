@@ -1,0 +1,32 @@
+:root {
+  /* Dark mode (default) */
+  --bg-main: #0f172a;
+  --bg-page: linear-gradient(to bottom, #0f172a, #1e293b);
+  --card-bg: rgba(15, 23, 42, 0.85);
+  --text-main: #e2e8f0;
+  --text-muted: #94a3b8;
+  --radius-lg: 16px;
+  --shadow-soft: 0 20px 50px rgba(0, 0, 0, 0.9);
+}
+
+/* Light mode – darker, more "glass" */
+[data-theme="light"] {
+  /* slightly darker, cooler background */
+  --bg-main: #cbd5f5;
+  --bg-page: radial-gradient(
+    circle at top,
+    #d9e4ff 0,
+    #c4d0f3 35%,
+    #a5b4e3 100%
+  );
+
+  /* base glass fill for cards/inputs */
+  --card-bg: rgba(255, 255, 255, 0.45);
+
+  /* text colours tuned for this background */
+  --text-main: #0f172a;
+  --text-muted: #4b5563;
+
+  /* deeper shadow so cards pop from background */
+  --shadow-soft: 0 24px 60px rgba(15, 23, 42, 0.28);
+}
