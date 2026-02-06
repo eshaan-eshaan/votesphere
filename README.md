@@ -80,7 +80,7 @@ A more detailed explanation lives in [`docs/architecture.md`](docs/architecture.
 ## 🌐 Live Demo
 
 - **Frontend (React app)**:  
-  `https://eshaan-guliani-votesphere-api.onrender.com`
+  `https://votesphere-eshaan-guliani.onrender.com`
 
 - **Backend API (Express)**:  
   `https://eshaan-guliani-votesphere-api.onrender.com`
