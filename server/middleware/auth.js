@@ -22,7 +22,7 @@ const authenticate = async (req, res, next) => {
         }
 
         // Verify the token
-        const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
         // Check if admin still exists
         const admin = await prisma.admin.findUnique({
@@ -103,7 +103,7 @@ const optionalAuth = async (req, res, next) => {
             req.headers.authorization?.replace("Bearer ", "");
 
         if (token) {
-            const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
             const admin = await prisma.admin.findUnique({
                 where: { id: decoded.adminId },
                 select: { id: true, email: true, role: true }

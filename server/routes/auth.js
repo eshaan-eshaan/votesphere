@@ -19,7 +19,7 @@ const REFRESH_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const generateTokens = (adminId) => {
     const accessToken = jwt.sign(
         { adminId },
-        process.env.JWT_ACCESS_SECRET,
+        process.env.JWT_SECRET,
         { expiresIn: ACCESS_TOKEN_EXPIRY }
     );
 
