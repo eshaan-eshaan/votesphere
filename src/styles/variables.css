@@ -1,32 +1,52 @@
 :root {
   /* Dark mode (default) */
-  --bg-main: #0f172a;
-  --bg-page: linear-gradient(to bottom, #0f172a, #1e293b);
+  --bg-main: #020617;
+  --bg-page: linear-gradient(135deg, #020617 0%, #0f172a 50%, #1e1b4b 100%);
   --card-bg: rgba(15, 23, 42, 0.85);
-  --text-main: #e2e8f0;
+  --text-main: #f1f5f9;
   --text-muted: #94a3b8;
   --radius-lg: 16px;
   --shadow-soft: 0 20px 50px rgba(0, 0, 0, 0.9);
+
+  /* Brand colors */
+  --primary: #6366f1;
+  --primary-light: #818cf8;
+  --primary-glow: rgba(99, 102, 241, 0.5);
+  --secondary: #22c55e;
+  --accent: #22d3ee;
+
+  /* Input colors */
+  --input-bg: rgba(15, 23, 42, 0.6);
+  --input-border: rgba(148, 163, 184, 0.3);
+  --input-text: #f1f5f9;
+  --input-placeholder: #64748b;
 }
 
-/* Light mode – darker, more "glass" */
+/* Light mode – High Contrast */
 [data-theme="light"] {
-  /* slightly darker, cooler background */
-  --bg-main: #cbd5f5;
-  --bg-page: radial-gradient(
-    circle at top,
-    #d9e4ff 0,
-    #c4d0f3 35%,
-    #a5b4e3 100%
-  );
+  /* Deeper purple gradient for better text contrast */
+  --bg-main: #e0e7ff;
+  --bg-page: linear-gradient(135deg,
+      #e0e7ff 0%,
+      #c7d2fe 40%,
+      #ddd6fe 70%,
+      #e0e7ff 100%);
 
-  /* base glass fill for cards/inputs */
-  --card-bg: rgba(255, 255, 255, 0.45);
+  /* Solid white cards for maximum readability */
+  --card-bg: rgba(255, 255, 255, 0.85);
 
-  /* text colours tuned for this background */
+  /* DARK text for high contrast */
   --text-main: #0f172a;
-  --text-muted: #4b5563;
+  --text-muted: #334155;
 
-  /* deeper shadow so cards pop from background */
-  --shadow-soft: 0 24px 60px rgba(15, 23, 42, 0.28);
+  /* Deeper shadow */
+  --shadow-soft:
+    0 20px 50px rgba(99, 102, 241, 0.2),
+    0 8px 24px rgba(0, 0, 0, 0.12);
+
+  /* Input colors for light mode */
+  --input-bg: rgba(255, 255, 255, 0.9);
+  --input-border: rgba(99, 102, 241, 0.3);
+  --input-text: #0f172a;
+  --input-placeholder: #64748b;
 }

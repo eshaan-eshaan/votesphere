@@ -1,0 +1,55 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Admin users who can access the dashboard
+model Admin {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  role         String   @default("admin")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  // Relation to refresh tokens
+  refreshTokens RefreshToken[]
+}
+
+// Encrypted votes stored in the ledger
+model Vote {
+  id               String   @id @default(uuid())
+  ballotId         String   @unique
+  electionId       String
+  encryptedBallot  String
+  choiceId         String
+  voterIdHash      String
+  keyImage         String   @unique // Linkable Ring Signature tag (prevents double voting)
+  ringSize         Int      @default(5)
+  signature        String?
+  signingPublicKey String?
+  castAt           DateTime @default(now())
+  
+  @@index([electionId])
+  @@index([voterIdHash])
+}
+
+// Refresh tokens for JWT rotation
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  adminId   String
+  admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  @@index([adminId])
+  @@index([token])
+}

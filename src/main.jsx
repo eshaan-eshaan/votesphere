@@ -5,6 +5,10 @@ import App from "./App.jsx";
 import { LanguageProvider } from "./components/LanguageContext.jsx";
 import { ThemeProvider } from "./components/ThemeContext.jsx";
 
+// Polyfill Buffer for lrs
+import { Buffer } from "buffer";
+window.Buffer = window.Buffer || Buffer;
+
 // CSS imports – only files that exist in src/styles
 import "./styles/variables.css";
 import "./styles/global.css";

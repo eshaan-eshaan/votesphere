@@ -80,10 +80,10 @@ A more detailed explanation lives in [`docs/architecture.md`](docs/architecture.
 ## 🌐 Live Demo
 
 - **Frontend (React app)**:  
-  `https://votesphere-eshaan-guliani.onrender.com`
+  `https://votesphere-frontend-pdua.onrender.com`
 
 - **Backend API (Express)**:  
-  `https://eshaan-guliani-votesphere-api.onrender.com`
+  `https://votesphere-api-7925.onrender.com`
 
 > Note: Free Render instances may sleep on inactivity; the first request can take a few seconds to respond.
 

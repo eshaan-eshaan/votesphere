@@ -1,453 +1,402 @@
-import React, { useState, useMemo } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
+import { useTheme } from "../components/ThemeContext";
+import ScrollLayout from "../components/ui/ScrollLayout";
+import GlassCard from "../components/ui/GlassCard";
+import TiltCard from "../components/ui/TiltCard";
+import { generateIdentity, signVote } from "../utils/ring-signature";
+import { generateKeyPair, encryptVote } from "../utils/crypto";
 import { QRCodeSVG } from "qrcode.react";
-import { appendLedgerEntry, appendAuditEvent } from "../utils/ledger.js";
+import { API_BASE } from "../config";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+// const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 const candidates = [
-  { id: "cand-a", name: "Rajesh Kumar – Security & Transparency" },
-  { id: "cand-b", name: "Priya Sharma – Governance & Ethics" },
-  { id: "cand-c", name: "Amit Patel – Innovation & Growth" },
+  { id: "c1", name: "Alice Johnson", party: "Progressive Future", color: "#3b82f6" },
+  { id: "c2", name: "Bob Smith", party: "Liberty Alliance", color: "#ef4444" },
+  { id: "c3", name: "Carol Davis", party: "Green Vison", color: "#22c55e" },
+  { id: "c4", name: "David Wilson", party: "Tech Forward", color: "#a855f7" }
 ];
 
-const fakeCipher = (text) => {
-  if (!text) return "—";
-  const base = btoa(text + Date.now().toString());
-  return `0x${base.slice(0, 8)}...${base.slice(-6)}`;
-};
-
-const generateBallotHash = (voterId, candidateId) => {
-  const combined = `${voterId}-${candidateId}-${Date.now()}`;
-  const hash = btoa(combined);
-  return `0x${hash.slice(0, 16)}...${hash.slice(-8)}`;
-};
-
 const KioskDemo = () => {
+  const [step, setStep] = useState(1);
   const [voterId, setVoterId] = useState("");
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [verified, setVerified] = useState(false);
-  const [selected, setSelected] = useState(null);
-  const [voteCast, setVoteCast] = useState(false);
-  const [ballotHash, setBallotHash] = useState("");
-  const [ballotId, setBallotId] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
 
-  const cipherText = useMemo(
-    () => fakeCipher(selected ? selected.id : ""),
-    [selected]
-  );
+  // Crypto State
+  const [keyPair, setKeyPair] = useState(null);
+  const [encryptedVote, setEncryptedVote] = useState("");
+  const [isEncrypting, setIsEncrypting] = useState(false);
+
+  // Ring Signature State
+  const [voterIdentity, setVoterIdentity] = useState(null);
+  const [ring, setRing] = useState([]);
+  const [ringSize, setRingSize] = useState(5);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [receipt, setReceipt] = useState(null);
+  const [error, setError] = useState(null);
+
+  // Initialize Admin Key for Encryption (Receiver)
+  useEffect(() => {
+    const initKeys = async () => {
+      try {
+        const encKeys = await generateKeyPair();
+        setKeyPair(encKeys);
+      } catch (err) {
+        console.error("Key generation failed:", err);
+        setError("Failed to initialize secure voting system.");
+      }
+    };
+    initKeys();
+  }, []);
 
   const handleVerify = () => {
-    setError("");
+    if (voterId.trim()) {
+      // Simulate Voter Registry: Generate Identity + Decoys for Ring
+      try {
+        const identity = generateIdentity();
+        setVoterIdentity(identity);
 
-    if (!voterId.trim()) {
-      setError("Please enter a mock Voter ID to continue.");
-      return;
+        // Generate decoys
+        const decoys = [];
+        for (let i = 0; i < ringSize - 1; i++) {
+          decoys.push(generateIdentity().publicKey);
+        }
+
+        // Create Ring (Shuffle voter into decoys)
+        const newRing = [...decoys, identity.publicKey].sort();
+        setRing(newRing);
+
+        setVerified(true);
+      } catch (e) {
+        console.error("Ring generation failed:", e);
+        setError("Failed to generate anonymous identity. Browser compatibility issue?");
+      }
     }
-    setVerified(true);
-
-    appendAuditEvent({
-      type: "identity_verified",
-      actor: voterId.trim(),
-      message: `Voter ${voterId.trim()} verified at kiosk.`,
-    });
   };
 
-  const handleCast = async () => {
-    if (!selected) {
-      setError("Please select a candidate before casting your vote.");
-      return;
-    }
-    if (submitting) return;
+  const handleSelect = (candidate) => {
+    setSelectedCandidate(candidate);
+    performEncryption(candidate);
+  };
 
-    const cleanVoterId = voterId.trim() || "ANON";
-    const maskedVoterId =
-      cleanVoterId.length > 3
-        ? `${cleanVoterId.slice(0, 2)}***${cleanVoterId.slice(-1)}`
-        : "VOTER";
-
-    const hash = generateBallotHash(cleanVoterId, selected.id);
-    const id = `BALLOT-${Date.now().toString().slice(-6)}`;
-    const nowIso = new Date().toISOString();
-
-    setSubmitting(true);
-    setError("");
+  const performEncryption = async (candidate) => {
+    if (!keyPair) return;
+    setIsEncrypting(true);
 
     try {
+      const cipher = await encryptVote(candidate.name, keyPair.publicKey);
+      // Simulate delay for effect
+      setTimeout(() => {
+        setEncryptedVote(cipher);
+        setIsEncrypting(false);
+      }, 800);
+    } catch (err) {
+      console.error("Encryption failed:", err);
+      setError("Encryption failed. Please try again.");
+      setIsEncrypting(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!encryptedVote || !voterId || !voterIdentity) return;
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      // Sign with Ring Signature
+      // Message can be the encrypted vote
+      const signature = signVote(encryptedVote, voterIdentity, ring);
+
       const payload = {
-        electionId: "society-chairperson-2026",
-        encryptedBallot: cipherText,
-        choiceId: selected.id,
-        auditHash: hash,
+        ballotId: crypto.randomUUID(),
+        electionId: "election-2025",
+        choiceId: selectedCandidate.id,
+        encryptedBallot: encryptedVote,
+        signature: signature,
+        ring: ring,
+        previousHash: "GENESIS_HASH"
       };
 
-      const res = await fetch(`${API_BASE}/api/votes`, {
+      const response = await fetch(`${API_BASE}/api/votes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(
-          body.error ||
-            "There was a problem submitting your vote. Please try again."
-        );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Vote submission failed");
       }
 
-      const data = await res.json().catch(() => null);
+      // Success
+      const finalizedHash = data.vote?.ballotId || data.transactionHash;
 
-      setBallotHash(hash);
-      setBallotId(id);
-      setVoteCast(true);
-
-      try {
-        const localPayload = { hash, ballotId: id, timestamp: nowIso };
-        localStorage.setItem(
-          "votesphere_lastBallot",
-          JSON.stringify(localPayload)
-        );
-      } catch (e) {
-        console.error("Could not persist last ballot", e);
-      }
-
-      appendLedgerEntry({
-        hash,
-        ballotId: id,
-        voter: maskedVoterId,
-        candidateId: selected.id,
-        candidateName: selected.name,
-        timestamp: nowIso,
-        blockId: "Demo Block",
+      setReceipt({
+        id: finalizedHash,
+        hash: finalizedHash,
+        timestamp: new Date().toLocaleString(),
+        candidate: selectedCandidate.name,
+        ringSize: ring.length
       });
 
-      appendAuditEvent({
-        type: "ballot_cast",
-        actor: maskedVoterId,
-        message: `Encrypted ballot ${id} recorded for ${selected.id}.`,
-      });
+      // Update local storage for Audit page convenience
+      localStorage.setItem("votesphere_lastBallot", JSON.stringify({
+        vote: {
+          transactionHash: finalizedHash,
+          encryptedBallot: encryptedVote,
+          castAt: new Date().toISOString()
+        }
+      }));
 
-      console.log("Vote stored successfully", data);
+      setStep(4);
     } catch (err) {
-      console.error(err);
-      setError(
-        err?.message ||
-          "There was a problem submitting your vote. Please try again."
-      );
+      console.error("Submission failed:", err);
+      setError(err.message);
     } finally {
-      setSubmitting(false);
+      setIsSubmitting(false);
     }
   };
 
+
+
   return (
-    <div className="page animate-fade-in">
-      <div className="container">
-        <div className="section-header">
-          <div className="badge badge-primary mb-2">
+    <ScrollLayout>
+      <div className="container" style={{ paddingTop: "8rem", paddingBottom: "5rem", maxWidth: "800px" }}>
+
+        {/* Header Section */}
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center"
+          style={{ marginBottom: "3rem" }}
+        >
+          <div className="badge badge-primary mb-3">
             Demo Only • Simulated Kiosk Flow
           </div>
-          <h2 className="section-title">
-            VoteSphere – Online Voting Kiosk Demo
+          <h2 className="section-title text-gradient" style={{ fontSize: "2.5rem", marginBottom: "1rem" }}>
+            VoteSphere Voting Portal
           </h2>
-          <p className="section-subtitle">
+          <p className="text-muted" style={{ fontSize: "1.1rem", maxWidth: "600px", margin: "0 auto", lineHeight: "1.7" }}>
             Experience the complete voter journey: identity verification, ballot
-            selection, and client‑side encryption before submission. This flow
-            illustrates VoteSphere&apos;s core rule: ONE PERSON, ONE VOTE.
+            selection, and client‑side encryption before submission.
           </p>
-        </div>
+        </motion.div>
 
         {/* Global error banner */}
-        {error && (
-          <div
-            style={{
-              marginBottom: 12,
-              padding: 10,
-              borderRadius: 8,
-              backgroundColor: "rgba(248, 113, 113, 0.1)",
-              border: "1px solid rgba(248, 113, 113, 0.6)",
-              fontSize: 13,
-              color: "#fecaca",
-            }}
-          >
-            ⚠ {error}
-          </div>
-        )}
-
-        {!voteCast ? (
-          <>
-            {/* Step 1: Identity Verification */}
-            <div className="card mb-3">
-              <div className="badge badge-soft mb-2">STEP 1 OF 2</div>
-              <h3 style={{ fontSize: 16, marginBottom: 8, fontWeight: 600 }}>
-                Identity Verification (Smart Card / Biometric)
-              </h3>
-              <p className="text-muted" style={{ fontSize: 13 }}>
-                In a real deployment, this step would authenticate via smart
-                card reader, fingerprint scanner, or Aadhaar‑based biometric. In
-                VoteSphere, this verification ensures each eligible voter is
-                issued exactly one secure ballot for the election.
-              </p>
-              <div className="mt-3">
-                <input
-                  className="input"
-                  placeholder="Enter Voter ID (e.g., V12345)"
-                  value={voterId}
-                  onChange={(e) => setVoterId(e.target.value)}
-                />
-              </div>
-              <div
-                style={{
-                  marginTop: 12,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <button
-                  className="btn btn-primary btn-liquid"
-                  onClick={handleVerify}
-                  disabled={!voterId.trim() || verified}
-                >
-                  {verified ? "Identity Verified" : "Verify Identity"}
-                </button>
-                <span className="badge badge-soft">Mock verification only</span>
-              </div>
-              {verified && (
-                <div
-                  style={{
-                    marginTop: 10,
-                    padding: 8,
-                    borderRadius: 8,
-                    backgroundColor: "rgba(34, 197, 94, 0.1)",
-                    border: "1px solid rgba(34, 197, 94, 0.4)",
-                    fontSize: 13,
-                    color: "#bbf7d0",
-                  }}
-                >
-                  ✓ Voter verified successfully. In VoteSphere, this marks you
-                  as eligible to cast one encrypted vote for this election.
-                </div>
-              )}
-            </div>
-
-            {/* Step 2: Ballot Selection */}
-            {verified && (
-              <div className="card mb-3">
-                <div className="badge badge-soft mb-2">STEP 2 OF 2</div>
-                <h3 style={{ fontSize: 16, marginBottom: 8, fontWeight: 600 }}>
-                  Cast Your Vote – Society Chairperson Election 2026
-                </h3>
-                <p className="text-muted" style={{ fontSize: 13 }}>
-                  Select one candidate below. Your choice will be encrypted on
-                  this device before being transmitted to the backend, enforcing
-                  privacy while still guaranteeing one person, one vote.
-                </p>
-                <div style={{ marginTop: 12 }}>
-                  {candidates.map((c) => {
-                    const sel = selected && selected.id === c.id;
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => setSelected(c)}
-                        className="card card-hover"
-                        style={{
-                          marginBottom: 10,
-                          textAlign: "left",
-                          cursor: "pointer",
-                          borderColor: sel
-                            ? "rgba(79,70,229,0.9)"
-                            : "rgba(148,163,184,0.35)",
-                          backgroundColor: sel
-                            ? "rgba(79,70,229,0.15)"
-                            : "var(--card-bg)",
-                        }}
-                      >
-                        <div style={{ fontSize: 14, fontWeight: 500 }}>
-                          {c.name}
-                        </div>
-                        <div className="text-muted" style={{ fontSize: 12 }}>
-                          Click to select this candidate
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-                <button
-                  className="btn btn-primary btn-liquid"
-                  style={{ marginTop: 16, width: "100%" }}
-                  onClick={handleCast}
-                  disabled={submitting || !selected}
-                >
-                  {submitting ? "Submitting..." : "Cast Encrypted Vote"}
-                </button>
-              </div>
-            )}
-
-            {/* Encryption Panel */}
-            {selected && (
-              <div className="card">
-                <h3
-                  style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}
-                >
-                  Client‑Side Encryption Panel
-                  <span
-                    className="badge badge-soft"
-                    style={{ marginLeft: 8, fontSize: 11 }}
-                  >
-                    SERVER‑BLIND
-                  </span>
-                </h3>
-                <p className="text-muted" style={{ fontSize: 12 }}>
-                  The kiosk uses the election&apos;s public key to encrypt the
-                  ballot locally. The backend only receives ciphertext, never
-                  the plaintext vote.
-                </p>
-                <div
-                  style={{
-                    fontFamily: "monospace",
-                    fontSize: 12,
-                    backgroundColor: "rgba(15,23,42,0.96)",
-                    borderRadius: 12,
-                    padding: 12,
-                    border: "1px solid rgba(148,163,184,0.5)",
-                  }}
-                >
-                  <div style={{ marginBottom: 6 }}>
-                    <span style={{ color: "#a5b4fc" }}>plaintext_choice</span>
-                    <span style={{ color: "#9ca3af" }}> = </span>
-                    <span style={{ color: "#22c55e" }}>{selected.name}</span>
-                  </div>
-                  <div style={{ marginBottom: 6 }}>
-                    <span style={{ color: "#a5b4fc" }}>public_key_id</span>
-                    <span style={{ color: "#9ca3af" }}> = </span>
-                    <span style={{ color: "#fbbf24" }}>
-                      "society-election-2026-rsa4096"
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ color: "#a5b4fc" }}>ciphertext</span>
-                    <span style={{ color: "#9ca3af" }}> = </span>
-                    <span style={{ color: "#22c55e" }}>{cipherText}</span>
-                  </div>
-                </div>
-                <p
-                  className="text-muted"
-                  style={{ fontSize: 11, marginTop: 8 }}
-                >
-                  In production, this ciphertext would be generated using a
-                  vetted cryptographic library (e.g., Web Crypto API with
-                  RSA‑OAEP or ECC) and stored on an immutable blockchain or
-                  secure ledger.
-                </p>
-              </div>
-            )}
-          </>
-        ) : (
-          /* Vote Receipt with QR Code */
-          <div className="card card-hover animate-scale-in">
-            <div
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
               style={{
-                padding: 12,
+                marginBottom: 20,
+                padding: 15,
                 borderRadius: 12,
-                backgroundColor: "rgba(34, 197, 94, 0.1)",
-                border: "1px solid rgba(34, 197, 94, 0.5)",
-                marginBottom: 16,
-                textAlign: "center",
+                backgroundColor: "rgba(239, 68, 68, 0.1)",
+                border: "1px solid rgba(239, 68, 68, 0.3)",
+                color: "#fca5a5",
+                display: "flex",
+                alignItems: "center",
+                gap: "10px"
               }}
             >
-              <h3 style={{ fontSize: 18, color: "#22c55e", marginBottom: 4 }}>
-                ✓ Vote Successfully Cast
-              </h3>
-              <p className="text-muted" style={{ fontSize: 13 }}>
-                Your vote has been encrypted and submitted successfully
-                (VoteSphere demo).
-              </p>
-            </div>
+              ⚠️ {error}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
-              📄 Vote Receipt
-            </h3>
-            <p className="text-muted" style={{ fontSize: 12, marginBottom: 12 }}>
-              Save this receipt for your records. You can use the Ballot ID to
-              verify your vote was counted on the Public Audit page.
-            </p>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr auto",
-                gap: 16,
-                alignItems: "start",
-              }}
+        <AnimatePresence mode="wait">
+          {step < 3 ? (
+            <motion.div
+              key="voting-steps"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              transition={{ duration: 0.3 }}
             >
-              <div>
-                <div
-                  style={{
-                    fontFamily: "monospace",
-                    fontSize: 12,
-                    backgroundColor: "rgba(15,23,42,0.96)",
-                                        borderRadius: 12,
-                    padding: 12,
-                    border: "1px solid rgba(148,163,184,0.5)",
-                  }}
-                >
-                  <div style={{ marginBottom: 6 }}>
-                    <span style={{ color: "#a5b4fc" }}>Ballot ID:</span>{" "}
-                    <span style={{ color: "#22c55e" }}>{ballotId}</span>
-                  </div>
-                  <div style={{ marginBottom: 6 }}>
-                    <span style={{ color: "#a5b4fc" }}>Voter Receipt Hash:</span>
-                  </div>
-                  <div style={{ color: "#22c55e", wordBreak: "break-all" }}>
-                    {ballotHash}
-                  </div>
-                  <div style={{ marginTop: 8, fontSize: 11, color: "#9ca3af" }}>
-                    Timestamp: {new Date().toLocaleString("en-IN")}
-                  </div>
+              {/* Step 1: Identity Verification */}
+              <GlassCard className="mb-4" style={{ padding: "2rem" }}>
+                <div className="badge badge-soft mb-3">STEP 1 OF 2</div>
+                <h3 style={{ fontSize: "1.25rem", marginBottom: "0.5rem", fontWeight: 600 }}>
+                  Identity Verification (Smart Card / Biometric)
+                </h3>
+                <p className="text-muted mb-4">
+                  In a real deployment, this step would authenticate via smart card reader or biometric scanner.
+                </p>
+
+                <div className="flex gap-4">
+                  <input
+                    className="input"
+                    style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.1)", color: "white" }}
+                    placeholder="Enter Voter ID (e.g., V12345)"
+                    value={voterId}
+                    onChange={(e) => setVoterId(e.target.value)}
+                    disabled={verified}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleVerify}
+                    disabled={!voterId.trim() || verified}
+                  >
+                    {verified ? "Verified ✓" : "Verify Identity"}
+                  </button>
                 </div>
-                <p className="text-muted" style={{ fontSize: 11, marginTop: 10 }}>
-                  <strong>Voter‑Verifiable Audit:</strong> You can later verify your
-                  ballot was counted by checking this hash in the public audit portal,
-                  without revealing your vote choice.
-                </p>
-              </div>
+                <div className="info-row">
+                  <span className="label">Voter ID Hash:</span>
+                  <span className="value font-mono">
+                    {voterId ? btoa(voterId).substring(0, 12) + "..." : "---"}
+                  </span>
+                </div>
+                <div className="info-row">
+                  <span className="label">Anonymity Ring:</span>
+                  <span className="value font-mono">
+                    Active (Size: {ring.length})
+                  </span>
+                </div>
+                {verified && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    style={{
+                      marginTop: 15,
+                      padding: "10px 15px",
+                      borderRadius: 8,
+                      backgroundColor: "rgba(34, 197, 94, 0.1)",
+                      border: "1px solid rgba(34, 197, 94, 0.3)",
+                      color: "#86efac",
+                    }}
+                  >
+                    ✓ Voter verified successfully. You are eligible to cast <strong>one</strong> encrypted ballot.
+                  </motion.div>
+                )}
+              </GlassCard>
 
-              <div
-                style={{
-                  padding: 12,
-                  backgroundColor: "#fff",
-                  borderRadius: 12,
-                  border: "2px solid rgba(148,163,184,0.5)",
-                }}
-              >
-                <QRCodeSVG value={ballotHash} size={120} />
-                <p
-                  style={{
-                    fontSize: 10,
-                    color: "#666",
-                    marginTop: 6,
-                    textAlign: "center",
-                  }}
+              {/* Step 2: Ballot Selection */}
+              {verified && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
                 >
-                  Scan to verify
-                </p>
-              </div>
-            </div>
+                  <GlassCard className="mb-4" style={{ padding: "2rem" }}>
+                    <div className="badge badge-soft mb-3">STEP 2 OF 2</div>
+                    <h3 style={{ fontSize: "1.25rem", marginBottom: "1rem", fontWeight: 600 }}>
+                      Cast Your Vote – Society Chairperson Election 2026
+                    </h3>
 
-            <button
-              className="btn btn-outline"
-              style={{ marginTop: 16, width: "100%" }}
-              onClick={() => window.location.reload()}
+                    <div style={{ display: "grid", gap: "1rem" }}>
+                      {candidates.map((c) => {
+                        const sel = selectedCandidate && selectedCandidate.id === c.id;
+                        return (
+                          <motion.button
+                            key={c.id}
+                            whileHover={{ scale: 1.02, backgroundColor: "rgba(255,255,255,0.1)" }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => handleSelect(c)}
+                            style={{
+                              width: "100%",
+                              padding: "1.5rem",
+                              textAlign: "left",
+                              borderRadius: "12px",
+                              border: sel ? "2px solid var(--primary)" : "1px solid rgba(255,255,255,0.1)",
+                              background: sel ? "rgba(6, 182, 212, 0.1)" : "rgba(255,255,255,0.05)",
+                              color: "white",
+                              cursor: "pointer",
+                              transition: "all 0.2s"
+                            }}
+                          >
+                            <div style={{ fontSize: "1.1rem", fontWeight: 600, color: sel ? "var(--primary)" : "white" }}>
+                              {c.name}
+                            </div>
+                          </motion.button>
+                        );
+                      })}
+                    </div>
+
+                    <button
+                      className="btn btn-primary btn-lg mt-4 w-full"
+                      style={{ width: "100%", padding: "1rem", fontSize: "1.1rem", marginTop: "2rem" }}
+                      onClick={handleSubmit}
+                      disabled={isSubmitting || !selectedCandidate}
+                    >
+                      {isSubmitting ? "Encrypting & Submitting..." : "Cast Encrypted Vote"}
+                    </button>
+                  </GlassCard>
+                </motion.div>
+              )}
+
+              {/* Encryption Panel */}
+              {selectedCandidate && (
+                <TiltCard>
+                  <div style={{ padding: "1rem" }}>
+                    <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.5rem", display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      🔐 Client‑Side Encryption Panel
+                      <span className="badge badge-soft" style={{ fontSize: "0.7rem" }}>SERVER‑BLIND</span>
+                    </h3>
+                    <div style={{ fontFamily: "monospace", fontSize: "0.85rem", background: "rgba(0,0,0,0.5)", padding: "1rem", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)" }}>
+                      <div className="mb-2">
+                        <span style={{ color: "#a5b4fc" }}>choice</span> = <span style={{ color: "#4ade80" }}>{selectedCandidate.name}</span>
+                      </div>
+                      <div className="mb-2">
+                        <span style={{ color: "#a5b4fc" }}>public_key</span> = <span style={{ color: "#fbbf24" }}>"society-election-2026"</span>
+                      </div>
+                      <div>
+                        <span style={{ color: "#a5b4fc" }}>ciphertext</span> = <span style={{ color: "#4ade80", wordBreak: "break-all" }}>{encryptedVote || "Encrypting..."}</span>
+                      </div>
+                    </div>
+                  </div>
+                </TiltCard>
+              )}
+            </motion.div>
+          ) : (
+            /* Vote Receipt with QR Code */
+            <motion.div
+              key="receipt"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ type: "spring", bounce: 0.5 }}
             >
-              Return to Kiosk Home
-            </button>
-          </div>
-        )}
+              <TiltCard>
+                <div style={{ textAlign: "center", padding: "1rem" }}>
+                  <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>✅</div>
+                  <h3 className="text-gradient" style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>Vote Successfully Cast</h3>
+                  <p className="text-muted mb-4">Your vote has been signed, encrypted, and anchored to the ledger.</p>
+                </div>
+
+                <div style={{ background: "white", padding: "2rem", borderRadius: "16px", display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem", color: "black" }}>
+                  <QRCodeSVG value={receipt?.vote?.ballotId || "void"} size={180} />
+                  <p style={{ fontSize: "0.9rem", color: "#666" }}>Scan to Verify on Mobile</p>
+                </div>
+
+                <div className="mt-4 p-4 rounded bg-black/50 border border-white/10 font-mono text-sm break-all">
+                  <div className="text-blue-300 mb-1">Ballot ID:</div>
+                  <div className="text-green-400">{receipt?.id}</div>
+                  <div className="text-blue-300 mt-2 mb-1">Ring Signature:</div>
+                  <div className="text-gray-400">Verified (Ring Size: {receipt?.ringSize})</div>
+                  <div className="text-blue-300 mt-2 mb-1">Receipt Hash:</div>
+                  <div className="text-gray-400" style={{ wordBreak: "break-all" }}>{receipt?.hash}</div>
+                </div>
+
+                <button
+                  className="btn btn-outline mt-6 w-full"
+                  style={{ width: "100%", padding: "1rem" }}
+                  onClick={() => window.location.reload()}
+                >
+                  Return to Kiosk Home
+                </button>
+              </TiltCard>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-    </div>
+    </ScrollLayout>
   );
 };
 
 export default KioskDemo;
-

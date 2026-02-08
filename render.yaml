@@ -1,10 +1,23 @@
 services:
   - type: web
-    name: votesphere-eshaan-guliani
-    env: static
-    buildCommand: npm install && npm run build
-    staticPublishPath: ./dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+    name: secure-vote-demo
+    env: node
+    plan: free
+    buildCommand: npm install && npm install --prefix server && npm run build
+    startCommand: node server/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: file:/data/dev.db
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        fromService:
+          type: web
+          name: secure-vote-demo
+          property: url
+    disk:
+      name: sqlite-data
+      mountPath: /data
+      sizeGB: 1

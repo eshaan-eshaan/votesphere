@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from "react";
+import { motion } from "framer-motion";
+import ScrollLayout from "../components/ui/ScrollLayout";
+import GlassCard from "../components/ui/GlassCard";
+import { useTheme } from "../components/ThemeContext";
+import { API_BASE } from "../config";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+// const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 const mockAuditRecords = [
-  // ...same mock records as before...
+  { hash: "0x4f3a...9c1b", blockId: "Block #1", timestamp: "10:30 AM", status: "Anchored" },
+  { hash: "0x81bc...d2f4", blockId: "Block #2", timestamp: "11:15 AM", status: "Anchored" },
+  { hash: "0xa7d9...e5c8", blockId: "Block #3", timestamp: "12:00 PM", status: "Finalizing" },
 ];
 
 const withLocalBallot = (baseRecords = mockAuditRecords) => {
@@ -12,14 +19,17 @@ const withLocalBallot = (baseRecords = mockAuditRecords) => {
     if (!raw) return baseRecords;
 
     const parsed = JSON.parse(raw);
-    if (!parsed?.hash) return baseRecords;
+    if (!parsed?.vote) return baseRecords;
 
     const localRecord = {
-      hash: parsed.hash,
+      hash: parsed.vote.transactionHash || parsed.vote.encryptedBallot,
       blockId: "Demo Block (Local)",
-      timestamp: new Date(parsed.timestamp).toLocaleString("en-IN"),
+      timestamp: new Date(parsed.vote.castAt || Date.now()).toLocaleString("en-IN"),
       status: "Verified",
+      isLocal: true
     };
+
+    if (baseRecords.find(r => r.hash === localRecord.hash)) return baseRecords;
 
     return [localRecord, ...baseRecords];
   } catch (e) {
@@ -29,6 +39,20 @@ const withLocalBallot = (baseRecords = mockAuditRecords) => {
 };
 
 const PublicAudit = () => {
+  const { theme } = useTheme();
+  const isLight = theme === "light";
+
+  // Theme-aware colors
+  const headingColor = isLight ? "#1e293b" : "white";
+  const textColor = isLight ? "#1e293b" : "#cbd5e1";
+  const mutedColor = isLight ? "#475569" : "#94a3b8";
+  const headerColor = isLight ? "#4f46e5" : "#94a3b8";
+  const hashColor = isLight ? "#4f46e5" : "#94a3b8";
+  const rowBg = isLight ? "rgba(99, 102, 241, 0.04)" : "rgba(255,255,255,0.03)";
+  const inputBg = isLight ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.3)";
+  const inputBorder = isLight ? "rgba(99, 102, 241, 0.3)" : "rgba(255,255,255,0.1)";
+  const inputText = isLight ? "#0f172a" : "white";
+
   const [searchHash, setSearchHash] = useState("");
   const [searchResult, setSearchResult] = useState(null);
   const [records, setRecords] = useState(mockAuditRecords);
@@ -49,19 +73,14 @@ const PublicAudit = () => {
           const votes = await res.json();
           if (Array.isArray(votes) && votes.length > 0) {
             const apiRecords = votes.map((v) => ({
-              hash: v.auditHash || v.encryptedBallot || v.id,
-              blockId: "API Ledger",
-              timestamp: v.castAt
-                ? new Date(v.castAt).toLocaleString("en-IN")
-                : "N/A",
-              status: "Verified",
+              hash: v.ballotId,
+              blockId: `Block #${v.ballotId.substring(0, 8)}`,
+              timestamp: v.castAt ? new Date(v.castAt).toLocaleString("en-IN") : "N/A",
+              status: v.signature ? `Ring Signed (Size: ${v.ringSize})` : "Verified",
+              keyImage: v.keyImage
             }));
             base = [...apiRecords, ...mockAuditRecords];
           }
-        } else {
-          setLoadError(
-            "Could not load live ledger from server. Showing demo data only."
-          );
         }
 
         setRecords(withLocalBallot(base));
@@ -85,47 +104,68 @@ const PublicAudit = () => {
     setVerifyError("");
     setSearchResult(null);
 
-    const cleaned = searchHash.trim();
-    if (!cleaned) {
+    // 1. Remove trailing dots (from copied truncated text) and trim
+    let query = searchHash.replace(/\.+$/, "").trim();
+
+    if (!query) {
       setVerifyError("Enter a ballot hash from your receipt to verify.");
       return;
     }
 
     setIsVerifying(true);
-    try {
-      const target = cleaned.toLowerCase();
-      const found = records.find((r) => r.hash.toLowerCase() === target);
-      setSearchResult(found || "not_found");
-      if (!found) {
-        setVerifyError("");
+    setTimeout(() => {
+      try {
+        // Try strict match first
+        let found = records.find((r) => r.hash === query);
+
+        // If not found, try normalizing
+        if (!found) {
+          // 1. Replace spaces with underscores (common copy-paste issue)
+          let normalized = query.replace(/\s+/g, "_");
+          if (!found) found = records.find((r) => r.hash === normalized);
+
+          // 2. Add 'ballot_' prefix if missing
+          if (!found && !normalized.startsWith("ballot_")) {
+            normalized = `ballot_${normalized}`;
+            found = records.find((r) => r.hash === normalized);
+          }
+        }
+
+        if (found) {
+          setSearchResult(found);
+        } else {
+          setVerifyError("Hash not found in ledger. Please check your receipt.");
+        }
+      } catch (e) {
+        console.error(e);
+        setVerifyError("Unexpected error while searching the ledger.");
+      } finally {
+        setIsVerifying(false);
       }
-    } catch (e) {
-      console.error(e);
-      setVerifyError("Unexpected error while searching the ledger.");
-    } finally {
-      setIsVerifying(false);
-    }
+    }, 500);
   };
 
-  const totalVotes = records.length;
-  const blocksAnchored = Array.from(
-    new Set(records.map((r) => r.blockId))
-  ).length;
-
   return (
-    <div className="page animate-fade-in">
-      <div className="container">
-        <div className="section-header">
-          <div className="badge badge-primary mb-2">
+    <ScrollLayout>
+      <div className="container" style={{ paddingTop: "6rem", paddingBottom: "4rem" }}>
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-5 text-center"
+        >
+          <div className="badge badge-primary mb-3">
             VoteSphere Public Transparency Portal • Read‑Only
           </div>
-          <h2 className="section-title">VoteSphere Public Audit Dashboard</h2>
-          <p className="section-subtitle">
+          <h2 className="section-title text-gradient" style={{ fontSize: "2.5rem" }}>
+            Public Audit Dashboard
+          </h2>
+          <p className="text-muted" style={{ maxWidth: "800px", margin: "0 auto" }}>
             Verify that your encrypted ballot was included in the tally without
-            revealing your choice. This portal exposes all ballot hashes anchored
-            to the tamper‑proof ledger so anyone can confirm ONE PERSON, ONE VOTE.
+            revealing your choice. This portal exposes all ballots anchored
+            to the tamper‑proof ledger.
           </p>
-        </div>
+        </motion.div>
 
         {/* Ledger load error banner */}
         {loadError && (
@@ -137,105 +177,129 @@ const PublicAudit = () => {
               backgroundColor: "rgba(248, 113, 113, 0.1)",
               border: "1px solid rgba(248, 113, 113, 0.6)",
               fontSize: 13,
-              color: "#fecaca",
+              color: "#ef4444",
             }}
           >
             ⚠ {loadError}
           </div>
         )}
 
-        <div className="card mb-3">
-          <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+        <GlassCard style={{ marginBottom: "2.5rem", marginTop: "2rem", padding: "2rem" }}>
+          <h3 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "1rem", color: headingColor }}>
             🔍 Verify Your Vote (Voter‑Verifiable Audit)
           </h3>
-          <p className="text-muted" style={{ fontSize: 13, marginBottom: 12 }}>
-            Enter the ballot hash from your receipt to verify it was counted. Your
-            vote choice remains private.
+          <p className="text-muted mb-4">
+            Enter the ballot hash from your receipt to verify it was counted. Your vote choice remains private.
           </p>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+
+          <div className="flex gap-4 flex-wrap">
             <input
-              className="input"
+              className="input flex-1"
+              style={{
+                background: inputBg,
+                border: `1px solid ${inputBorder}`,
+                color: inputText,
+                minWidth: "250px"
+              }}
               placeholder="Enter ballot hash (e.g., 0x4f3a...)"
               value={searchHash}
               onChange={(e) => setSearchHash(e.target.value)}
-              style={{ flex: 1, minWidth: 200 }}
               disabled={isLoading}
             />
             <button
-              className="btn btn-primary btn-liquid"
+              className="btn btn-primary"
               onClick={handleSearch}
-              disabled={
-                isLoading || isVerifying || !searchHash.trim()
-              }
+              disabled={isLoading || isVerifying || !searchHash.trim()}
             >
-              {isLoading
-                ? "Loading ledger..."
-                : isVerifying
-                ? "Verifying..."
-                : "Verify"}
+              {isVerifying ? "Verifying..." : "Verify on Ledger"}
             </button>
           </div>
 
           {/* Verify error banner */}
           {verifyError && (
-            <div
-              style={{
-                marginTop: 10,
-                padding: 8,
-                borderRadius: 8,
-                backgroundColor: "rgba(248, 113, 113, 0.1)",
-                border: "1px solid rgba(248, 113, 113, 0.6)",
-                fontSize: 13,
-                color: "#fecaca",
-              }}
-            >
+            <div className="mt-4 p-3 rounded bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
               ⚠ {verifyError}
             </div>
           )}
 
           {searchResult === "not_found" && !verifyError && (
-            <div
-              style={{
-                marginTop: 10,
-                padding: 8,
-                borderRadius: 8,
-                backgroundColor: "rgba(239, 68, 68, 0.1)",
-                border: "1px solid rgba(239, 68, 68, 0.4)",
-                fontSize: 13,
-                color: "#fca5a5",
-              }}
-            >
+            <div className="mt-4 p-3 rounded bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
               ❌ Hash not found in ledger. Please check your receipt.
             </div>
           )}
 
           {searchResult && searchResult !== "not_found" && (
-            <div
-              className="animate-scale-in"
-              style={{
-                marginTop: 10,
-                padding: 10,
-                borderRadius: 8,
-                backgroundColor: "rgba(34, 197, 94, 0.1)",
-                border: "1px solid rgba(34, 197, 94, 0.4)",
-                fontSize: 13,
-                color: "#bbf7d0",
-              }}
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              className="mt-4 p-4 rounded bg-green-500/10 border border-green-500/30 text-green-300"
             >
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              <div style={{ fontWeight: 600, marginBottom: "0.5rem", fontSize: "1.1rem" }}>
                 ✓ Vote Verified Successfully
               </div>
-              <div>Block: {searchResult.blockId}</div>
-              <div>Timestamp: {searchResult.timestamp}</div>
-              <div>Status: {searchResult.status}</div>
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+                <div><span className="text-gray-400">Block:</span> {searchResult.blockId}</div>
+                <div><span className="text-gray-400">Timestamp:</span> {searchResult.timestamp}</div>
+                <div><span className="text-gray-400">Status:</span> {searchResult.status}</div>
+              </div>
+            </motion.div>
           )}
-        </div>
+        </GlassCard>
 
-        {/* Baaki stats + table wala code tumhare original jaisa hi reh sakta hai */}
-        {/* ...existing statistics and table JSX... */}
+        {/* Full Ledger Table */}
+        <GlassCard>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+            <h3 style={{ fontSize: "1.25rem", fontWeight: 600, color: headingColor }}>Public Ballot Ledger</h3>
+            <div style={{ fontSize: "0.9rem", color: mutedColor }}>
+              Total Records: <span style={{ color: isLight ? "#4f46e5" : "#22c55e", fontWeight: "bold" }}>{records.length}</span>
+            </div>
+          </div>
+
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "0 0.5rem", fontSize: "0.9rem" }}>
+              <thead>
+                <tr style={{ textAlign: "left", color: headerColor }}>
+                  <th style={{ padding: "0 1rem", fontWeight: 600 }}>Timestamp</th>
+                  <th style={{ padding: "0 1rem", fontWeight: 600 }}>Encrypted Ballot Hash</th>
+                  <th style={{ padding: "0 1rem", fontWeight: 600 }}>Block ID</th>
+                  <th style={{ padding: "0 1rem", fontWeight: 600 }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.slice(0, 50).map((r, i) => (
+                  <tr key={i} style={{ background: r.isLocal ? "rgba(34, 197, 94, 0.08)" : rowBg }}>
+                    <td style={{ padding: "1rem", borderRadius: "8px 0 0 8px", color: textColor }}>
+                      {r.timestamp}
+                    </td>
+                    <td style={{ padding: "1rem", fontFamily: "monospace", color: hashColor }}>
+                      {r.hash.substring(0, 24)}...
+                    </td>
+                    <td style={{ padding: "1rem", color: mutedColor }}>
+                      {r.blockId}
+                    </td>
+                    <td style={{ padding: "1rem", borderRadius: "0 8px 8px 0" }}>
+                      <span style={{
+                        color: r.status === "Verified" ? "#22c55e" : mutedColor,
+                        background: r.status === "Verified" ? "rgba(34, 197, 94, 0.15)" : "rgba(148,163,184,0.1)",
+                        padding: "4px 8px",
+                        borderRadius: "4px",
+                        fontSize: "0.8rem",
+                        fontWeight: 600
+                      }}>
+                        {r.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="text-center text-xs mt-4" style={{ color: mutedColor }}>
+              Showing latest 50 records from the immutable ledger.
+            </div>
+          </div>
+        </GlassCard>
       </div>
-    </div>
+    </ScrollLayout>
   );
 };
 
