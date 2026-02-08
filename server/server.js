@@ -252,7 +252,8 @@ if (process.env.NODE_ENV === "production") {
   app.use(express.static(path.join(__dirname, "../dist")));
 
   // Handle SPA routing, return all requests to React app
-  app.get("*", (req, res, next) => {
+  // Express 5 requires named parameters for wildcards: {*splat}
+  app.get("{*splat}", (req, res, next) => {
     // Don't serve index.html for API requests that weren't found
     if (req.path.startsWith("/api")) {
       return next();
