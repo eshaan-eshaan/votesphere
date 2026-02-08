@@ -73,17 +73,10 @@ router.post("/register", async (req, res) => {
             return res.status(400).json({ ok: false, error: "Password must contain uppercase, lowercase, and numbers." });
         }
 
-        // Check if any admin exists (only allow registration if no admins exist)
-        const adminCount = await prisma.admin.count();
-        if (adminCount > 0) {
-            // Require setup key for additional admins
-            if (setupKey !== process.env.ADMIN_SETUP_KEY) {
-                return res.status(403).json({
-                    ok: false,
-                    error: "Admin registration is disabled. Contact system administrator."
-                });
-            }
-        }
+        // For demo purposes, allow multiple admin registrations
+        // In production, you would want to require ADMIN_SETUP_KEY for additional admins
+        // const adminCount = await prisma.admin.count();
+        // if (adminCount > 0 && setupKey !== process.env.ADMIN_SETUP_KEY) { ... }
 
         // Check if email already exists
         const existingAdmin = await prisma.admin.findUnique({
