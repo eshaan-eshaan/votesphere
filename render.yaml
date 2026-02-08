@@ -9,15 +9,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        value: file:/data/dev.db
+        value: file:./dev.db
       - key: JWT_SECRET
         generateValue: true
-      - key: CORS_ORIGIN
-        fromService:
-          type: web
-          name: secure-vote-demo
-          property: url
-    disk:
-      name: sqlite-data
-      mountPath: /data
-      sizeGB: 1
+
