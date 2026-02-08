@@ -66,9 +66,12 @@ const AdminLogin = () => {
 
     if (mode === "login") {
       const result = await login(email, password);
+      console.log("Login result:", result);
       if (result.success) {
+        console.log("Login success, navigating to /admin");
         navigate("/admin");
       } else {
+        console.log("Login failed:", result.error);
         setLocalError(result.error);
       }
     } else {
