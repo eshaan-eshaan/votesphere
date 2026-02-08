@@ -98,7 +98,7 @@ router.post("/register", async (req, res) => {
             data: {
                 email: email.toLowerCase(),
                 passwordHash,
-                role: adminCount === 0 ? "superadmin" : "admin"
+                role: "admin" // For demo, all users get admin role
             },
             select: { id: true, email: true, role: true }
         });
