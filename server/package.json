@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "npx prisma db push && node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -25,9 +25,8 @@
     "express-rate-limit": "^8.2.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
-    "lrs": "^0.1.5"
-  },
-  "devDependencies": {
+    "lrs": "^0.1.5",
     "prisma": "^5.22.0"
-  }
+  },
+  "devDependencies": {}
 }
