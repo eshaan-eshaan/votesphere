@@ -12,6 +12,7 @@ const router = express.Router();
 const BCRYPT_ROUNDS = 12;
 const ACCESS_TOKEN_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || "15m";
 const REFRESH_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const JWT_SECRET = process.env.JWT_SECRET || "votesphere-demo-secret-change-in-production-2024";
 
 /**
  * Generate JWT tokens
@@ -19,7 +20,7 @@ const REFRESH_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const generateTokens = (adminId) => {
     const accessToken = jwt.sign(
         { adminId },
-        process.env.JWT_SECRET,
+        JWT_SECRET,
         { expiresIn: ACCESS_TOKEN_EXPIRY }
     );
 
