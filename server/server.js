@@ -14,6 +14,8 @@ const authRoutes = require("./routes/auth");
 const { authenticate, optionalAuth } = require("./middleware/auth");
 
 const app = express();
+// Trust proxy - required for express-rate-limit behind Render's reverse proxy
+app.set('trust proxy', 1);
 // const prisma = new PrismaClient(); // Removed as it is now imported from ./db
 const PORT = process.env.PORT || 5000;
 
