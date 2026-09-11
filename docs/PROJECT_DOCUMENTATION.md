@@ -178,10 +178,11 @@ VoteSphere is a standalone web application consisting of:
 ### 3.4 Non-Functional Requirements
 
 #### NFR-001: Security
-- All ballot content encrypted with AES-256
-- Ring signatures provide voter anonymity
+- Ballot choice encrypted client-side with the election's public key (RSA-OAEP-4096); only the server, holding the matching private key, can decrypt - and only in aggregate, for tallying
+- Ring signatures provide voter anonymity; key images prevent double voting
 - HTTPS enforced in production
 - JWT tokens with short expiration (15 min access, 7 day refresh)
+- Admin registration requires a shared `ADMIN_SETUP_KEY`, not open to the public
 
 #### NFR-002: Performance
 - Page load time < 3 seconds
@@ -714,19 +715,22 @@ Traditional voting faces a dilemma:
 
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
-| `POST` | `/api/auth/register` | Register admin | No |
+| `POST` | `/api/auth/register` | Register admin (requires `setupKey` matching `ADMIN_SETUP_KEY`) | No |
 | `POST` | `/api/auth/login` | Admin login | No |
 | `POST` | `/api/auth/refresh` | Refresh token | Yes |
-| `GET` | `/api/votes` | Get all votes | No |
+| `GET` | `/api/election/public-key` | Election's public key, for client-side ballot encryption | No |
+| `GET` | `/api/votes` | Get all votes (choice never included, even authenticated) | No |
 | `POST` | `/api/votes` | Cast a vote | No |
-| `GET` | `/api/admin/summary` | Election stats | Yes |
+| `GET` | `/api/stats` | Decrypted per-candidate tallies | Yes |
 
 ### 10.2 Environment Variables
 
 ```env
 NODE_ENV=production
 DATABASE_URL=file:./dev.db
-JWT_SECRET=<random-string>
+JWT_SECRET=<random-string>           # required - server refuses to start without it
+ADMIN_SETUP_KEY=<random-string>      # required to allow any admin registration
+ELECTION_PRIVATE_KEY=<PEM, optional> # stable election key; auto-generated in memory if unset
 ```
 
 ### 10.3 Repository Structure
