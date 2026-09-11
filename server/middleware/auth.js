@@ -1,6 +1,6 @@
 const jwt = require("jsonwebtoken");
 const prisma = require("../db");
-const JWT_SECRET = process.env.JWT_SECRET || "votesphere-demo-secret-change-in-production-2024";
+const { JWT_SECRET } = require("../config");
 
 // const prisma = new PrismaClient(); // Removed
 

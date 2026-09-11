@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const prisma = require("../db");
 const { authenticate } = require("../middleware/auth");
+const { JWT_SECRET, ADMIN_SETUP_KEY } = require("../config");
 
 const router = express.Router();
 // const prisma = new PrismaClient(); // Removed
@@ -12,7 +13,6 @@ const router = express.Router();
 const BCRYPT_ROUNDS = 12;
 const ACCESS_TOKEN_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || "15m";
 const REFRESH_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const JWT_SECRET = process.env.JWT_SECRET || "votesphere-demo-secret-change-in-production-2024";
 
 /**
  * Generate JWT tokens
@@ -74,10 +74,20 @@ router.post("/register", async (req, res) => {
             return res.status(400).json({ ok: false, error: "Password must contain uppercase, lowercase, and numbers." });
         }
 
-        // For demo purposes, allow multiple admin registrations
-        // In production, you would want to require ADMIN_SETUP_KEY for additional admins
-        // const adminCount = await prisma.admin.count();
-        // if (adminCount > 0 && setupKey !== process.env.ADMIN_SETUP_KEY) { ... }
+        // Admin registration requires the shared setup key for every signup,
+        // not just after the first admin - see server/config.js.
+        if (!ADMIN_SETUP_KEY) {
+            return res.status(503).json({
+                ok: false,
+                error: "Admin registration is disabled (ADMIN_SETUP_KEY not configured)."
+            });
+        }
+        if (setupKey !== ADMIN_SETUP_KEY) {
+            return res.status(403).json({
+                ok: false,
+                error: "Invalid setup key."
+            });
+        }
 
         // Check if email already exists
         const existingAdmin = await prisma.admin.findUnique({

@@ -12,4 +12,6 @@ services:
         value: file:./dev.db
       - key: JWT_SECRET
         generateValue: true
+      - key: ADMIN_SETUP_KEY
+        generateValue: true
 

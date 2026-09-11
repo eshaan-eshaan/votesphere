@@ -15,6 +15,7 @@ const AdminLogin = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [setupKey, setSetupKey] = useState("");
   const [localError, setLocalError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -47,6 +48,10 @@ const AdminLogin = () => {
     }
 
     if (mode === "register") {
+      if (!setupKey.trim()) {
+        setLocalError("Setup key is required. Ask your election administrator for it.");
+        return;
+      }
       if (password !== confirmPassword) {
         setLocalError("Passwords do not match.");
         return;
@@ -75,12 +80,13 @@ const AdminLogin = () => {
         setLocalError(result.error);
       }
     } else {
-      const result = await register(email, password);
+      const result = await register(email, password, setupKey);
       if (result.success) {
         setSuccessMsg("Account created! You can now login.");
         setMode("login");
         setPassword("");
         setConfirmPassword("");
+        setSetupKey("");
       } else {
         setLocalError(result.error);
       }
@@ -187,6 +193,27 @@ const AdminLogin = () => {
                     placeholder="Confirm Password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
+                    disabled={submitting}
+                    style={{
+                      width: "100%",
+                      padding: "1rem",
+                      marginBottom: "1rem",
+                      borderRadius: "12px",
+                      border: isLight ? "1px solid rgba(99, 102, 241, 0.3)" : "1px solid rgba(255,255,255,0.15)",
+                      background: isLight ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.4)",
+                      color: isLight ? "#0f172a" : "white",
+                      fontSize: "1rem",
+                      outline: "none"
+                    }}
+                  />
+                )}
+
+                {mode === "register" && (
+                  <input
+                    type="password"
+                    placeholder="Setup Key (from your election administrator)"
+                    value={setupKey}
+                    onChange={(e) => setSetupKey(e.target.value)}
                     disabled={submitting}
                     style={{
                       width: "100%",
