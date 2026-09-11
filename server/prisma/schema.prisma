@@ -28,8 +28,7 @@ model Vote {
   id               String   @id @default(uuid())
   ballotId         String   @unique
   electionId       String
-  encryptedBallot  String
-  choiceId         String
+  encryptedBallot  String   // choice, encrypted client-side with the election public key (see server/election-keys.js)
   voterIdHash      String
   keyImage         String   @unique // Linkable Ring Signature tag (prevents double voting)
   ringSize         Int      @default(5)

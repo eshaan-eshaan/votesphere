@@ -4,6 +4,7 @@ import { importSigningKey, verifySignature } from "../utils/crypto";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../components/ThemeContext";
 import { API_BASE } from "../config";
+import { candidates } from "../data/candidates";
 
 // const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -23,6 +24,8 @@ const AdminDashboard = () => {
   const [turnout, setTurnout] = useState(0);
   const [votes, setVotes] = useState([]);
   const [verificationStatus, setVerificationStatus] = useState({});
+  const [results, setResults] = useState(null);
+  const [resultsError, setResultsError] = useState("");
 
   const handleLogout = async () => {
     await logout();
@@ -47,6 +50,22 @@ const AdminDashboard = () => {
     }
 
     fetchVotes();
+  }, []);
+
+  useEffect(() => {
+    async function fetchResults() {
+      try {
+        const res = await fetch(`${API_BASE}/api/stats`, { credentials: "include" });
+        if (!res.ok) throw new Error("Failed to fetch results");
+        const data = await res.json();
+        setResults(data);
+      } catch (err) {
+        console.error(err);
+        setResultsError("Could not load results. The server decrypts ballots on demand for tallying - try again shortly.");
+      }
+    }
+
+    fetchResults();
   }, []);
 
   const verifyAllVotes = (voteList) => {
@@ -141,6 +160,51 @@ const AdminDashboard = () => {
         </div>
 
         <div style={{ display: "grid", gap: "2rem" }}>
+          {/* Results by Candidate */}
+          <GlassCard>
+            <div style={{ marginBottom: "1.5rem" }}>
+              <h3 style={{ fontSize: "1.25rem", fontWeight: 600 }}>Results by Candidate</h3>
+              <p className="text-muted text-sm">
+                Decrypted server-side, on demand, from election-key-encrypted ballots — individual votes stay ciphertext at rest.
+              </p>
+            </div>
+
+            {resultsError && (
+              <div className="p-3 rounded bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
+                ⚠ {resultsError}
+              </div>
+            )}
+
+            {!resultsError && !results && (
+              <div className="text-muted text-sm">Loading results...</div>
+            )}
+
+            {results && (
+              <div style={{ display: "grid", gap: "0.75rem" }}>
+                {candidates.map((c) => {
+                  const count = results.byChoice?.[c.id] || 0;
+                  const pct = results.total > 0 ? Math.round((count / results.total) * 100) : 0;
+                  return (
+                    <div key={c.id}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.25rem", fontSize: "0.9rem" }}>
+                        <span>{c.name} <span className="text-muted">({c.party})</span></span>
+                        <span style={{ fontWeight: 600 }}>{count} votes</span>
+                      </div>
+                      <div style={{ height: "8px", borderRadius: "99px", background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${pct}%`, background: c.color, borderRadius: "99px", transition: "width 0.4s ease" }} />
+                      </div>
+                    </div>
+                  );
+                })}
+                {results.undecryptable > 0 && (
+                  <div className="text-muted text-sm" style={{ marginTop: "0.5rem" }}>
+                    {results.undecryptable} ballot(s) could not be decrypted (encrypted under a rotated election key).
+                  </div>
+                )}
+              </div>
+            )}
+          </GlassCard>
+
           {/* Live Feed */}
           <GlassCard>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>

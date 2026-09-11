@@ -7,6 +7,7 @@ const rateLimit = require("express-rate-limit");
 const cookieParser = require("cookie-parser");
 const prisma = require("./db");
 const lrs = require("lrs");
+const { getPublicKeyJwk, decryptChoice } = require("./election-keys");
 
 
 // Import routes
@@ -87,6 +88,13 @@ app.get("/api/health", (req, res) => {
 // Auth routes (with stricter rate limiting)
 app.use("/api/auth", authLimiter, authRoutes);
 
+// Election public key (public) - clients encrypt their ballot choice with
+// this before signing and submitting it. The matching private key never
+// leaves the server; see server/election-keys.js.
+app.get("/api/election/public-key", (req, res) => {
+  res.json({ publicKey: getPublicKeyJwk() });
+});
+
 // ---------- Vote Routes ----------
 
 // Get all votes (optionally authenticated - shows more data if authenticated)
@@ -125,8 +133,7 @@ app.post("/api/votes", async (req, res) => {
   try {
     const {
       electionId,
-      encryptedBallot,
-      choiceId,
+      encryptedBallot, // ciphertext of the choice, encrypted client-side with the election public key
       signature,
       ring,
       voterIdHash // Optional now
@@ -136,7 +143,6 @@ app.post("/api/votes", async (req, res) => {
     const errors = [];
     if (!electionId) errors.push("electionId is required.");
     if (!encryptedBallot) errors.push("encryptedBallot is required.");
-    if (!choiceId) errors.push("choiceId is required.");
     if (!signature) errors.push("Ring signature is required.");
     if (!ring || !Array.isArray(ring)) errors.push("Ring public keys are required.");
 
@@ -180,7 +186,6 @@ app.post("/api/votes", async (req, res) => {
         ballotId,
         electionId: electionId.trim(),
         encryptedBallot: encryptedBallot.trim(),
-        choiceId: choiceId.trim(),
         voterIdHash: voterIdHash || "ANONYMOUS_RING_MEMBER",
         signature: signature,
         keyImage: keyImage,
@@ -206,15 +211,22 @@ app.get("/api/stats", authenticate, async (req, res) => {
   try {
     const votes = await prisma.vote.findMany();
     const counts = {};
+    let undecryptable = 0;
 
     for (const v of votes) {
-      const key = v.choiceId || "UNKNOWN";
-      counts[key] = (counts[key] || 0) + 1;
+      try {
+        const choice = decryptChoice(v.encryptedBallot);
+        counts[choice] = (counts[choice] || 0) + 1;
+      } catch (e) {
+        // Ballot encrypted under a previous (now-rotated) election key, or malformed.
+        undecryptable++;
+      }
     }
 
     res.json({
       total: votes.length,
       byChoice: counts,
+      undecryptable,
       accessedBy: req.admin.email
     });
   } catch (error) {

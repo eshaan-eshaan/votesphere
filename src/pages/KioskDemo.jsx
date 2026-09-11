@@ -6,18 +6,12 @@ import ScrollLayout from "../components/ui/ScrollLayout";
 import GlassCard from "../components/ui/GlassCard";
 import TiltCard from "../components/ui/TiltCard";
 import { generateIdentity, signVote } from "../utils/ring-signature";
-import { generateKeyPair, encryptVote } from "../utils/crypto";
+import { importKey, encryptVote } from "../utils/crypto";
 import { QRCodeSVG } from "qrcode.react";
 import { API_BASE } from "../config";
+import { candidates } from "../data/candidates";
 
 // const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
-
-const candidates = [
-  { id: "c1", name: "Alice Johnson", party: "Progressive Future", color: "#3b82f6" },
-  { id: "c2", name: "Bob Smith", party: "Liberty Alliance", color: "#ef4444" },
-  { id: "c3", name: "Carol Davis", party: "Green Vison", color: "#22c55e" },
-  { id: "c4", name: "David Wilson", party: "Tech Forward", color: "#a855f7" }
-];
 
 const KioskDemo = () => {
   const [step, setStep] = useState(1);
@@ -39,14 +33,20 @@ const KioskDemo = () => {
   const [receipt, setReceipt] = useState(null);
   const [error, setError] = useState(null);
 
-  // Initialize Admin Key for Encryption (Receiver)
+  // Fetch the election's public key - the server holds the matching private
+  // key and only ever decrypts ballots in aggregate, for tallying. No
+  // throwaway per-vote keypair anymore: that made the ciphertext permanently
+  // undecryptable by anyone, including legitimate tallying.
   useEffect(() => {
     const initKeys = async () => {
       try {
-        const encKeys = await generateKeyPair();
-        setKeyPair(encKeys);
+        const res = await fetch(`${API_BASE}/api/election/public-key`);
+        if (!res.ok) throw new Error("Failed to fetch election public key");
+        const { publicKey: jwk } = await res.json();
+        const publicKey = await importKey(jwk);
+        setKeyPair({ publicKey });
       } catch (err) {
-        console.error("Key generation failed:", err);
+        console.error("Key fetch failed:", err);
         setError("Failed to initialize secure voting system.");
       }
     };
@@ -88,7 +88,7 @@ const KioskDemo = () => {
     setIsEncrypting(true);
 
     try {
-      const cipher = await encryptVote(candidate.name, keyPair.publicKey);
+      const cipher = await encryptVote(candidate.id, keyPair.publicKey);
       // Simulate delay for effect
       setTimeout(() => {
         setEncryptedVote(cipher);
@@ -115,8 +115,7 @@ const KioskDemo = () => {
       const payload = {
         ballotId: crypto.randomUUID(),
         electionId: "election-2025",
-        choiceId: selectedCandidate.id,
-        encryptedBallot: encryptedVote,
+        encryptedBallot: encryptedVote, // ciphertext of choiceId, encrypted with the election public key
         signature: signature,
         ring: ring,
         previousHash: "GENESIS_HASH"
