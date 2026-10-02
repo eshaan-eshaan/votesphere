@@ -1,398 +1,388 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useTheme } from "../components/ThemeContext";
+import { QRCodeSVG } from "qrcode.react";
 import ScrollLayout from "../components/ui/ScrollLayout";
 import GlassCard from "../components/ui/GlassCard";
 import TiltCard from "../components/ui/TiltCard";
+import { useElection } from "../hooks/useElection";
 import { generateIdentity, signVote } from "../utils/ring-signature";
 import { importKey, encryptVote } from "../utils/crypto";
-import { QRCodeSVG } from "qrcode.react";
+import {
+  loadIdentity, saveIdentity, getVotedBallot, rememberVoted,
+  downloadIdentityBackup, parseIdentityBackup,
+} from "../utils/identity";
 import { API_BASE } from "../config";
-import { candidates } from "../data/candidates";
 
-// const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const postJson = async (path, body) => {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  return data;
+};
+
+const inputStyle = {
+  width: "100%", padding: "1rem", borderRadius: "12px", fontSize: "1rem",
+  background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.15)", color: "white",
+  fontFamily: "monospace", letterSpacing: "0.05em",
+};
 
 const KioskDemo = () => {
-  const [step, setStep] = useState(1);
-  const [voterId, setVoterId] = useState("");
-  const [selectedCandidate, setSelectedCandidate] = useState(null);
-  const [verified, setVerified] = useState(false);
+  const { election, error: electionError, loading } = useElection(5000);
 
-  // Crypto State
-  const [keyPair, setKeyPair] = useState(null);
-  const [encryptedVote, setEncryptedVote] = useState("");
-  const [isEncrypting, setIsEncrypting] = useState(false);
+  // Registration
+  const [code, setCode] = useState("");
+  const [registering, setRegistering] = useState(false);
+  const [identityVersion, setIdentityVersion] = useState(0);
 
-  // Ring Signature State
-  const [voterIdentity, setVoterIdentity] = useState(null);
-  const [ring, setRing] = useState([]);
-  const [ringSize, setRingSize] = useState(5);
-
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  // Voting
+  const [electionKey, setElectionKey] = useState(null); // { cryptoKey, fingerprint }
+  const [selected, setSelected] = useState(null);
+  const [cipher, setCipher] = useState("");
+  const [encrypting, setEncrypting] = useState(false);
+  const encryptSeq = useRef(0);
+  const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState(null);
+
   const [error, setError] = useState(null);
 
-  // Fetch the election's public key - the server holds the matching private
-  // key and only ever decrypts ballots in aggregate, for tallying. No
-  // throwaway per-vote keypair anymore: that made the ciphertext permanently
-  // undecryptable by anyone, including legitimate tallying.
+  const electionId = election ? election.id : null;
+  const status = election ? election.status : null;
+
+  // The voter's ring key lives in this browser between registration and voting.
+  // identityVersion forces a re-read after it changes.
+  const identity = useMemo(
+    () => (electionId ? loadIdentity(electionId) : null),
+    [electionId, identityVersion] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const votedBallot = electionId && !receipt ? getVotedBallot(electionId) : null;
+
+  // Fetch the election's public key once voting is open.
+  const needsKey = status === "VOTING" && !!identity && !votedBallot;
   useEffect(() => {
-    const initKeys = async () => {
+    if (!needsKey || electionKey) return;
+    let cancelled = false;
+    (async () => {
       try {
         const res = await fetch(`${API_BASE}/api/election/public-key`);
-        if (!res.ok) throw new Error("Failed to fetch election public key");
+        if (!res.ok) throw new Error("Failed to fetch the election public key");
         const { publicKey: jwk } = await res.json();
-        const publicKey = await importKey(jwk);
-        setKeyPair({ publicKey });
-      } catch (err) {
-        console.error("Key fetch failed:", err);
-        setError("Failed to initialize secure voting system.");
+        const cryptoKey = await importKey(jwk);
+        if (!cancelled) setElectionKey({ cryptoKey, fingerprint: `${jwk.n.slice(0, 20)}...` });
+      } catch {
+        if (!cancelled) setError("Could not load the election key. Please reload the page.");
       }
-    };
-    initKeys();
-  }, []);
+    })();
+    return () => { cancelled = true; };
+  }, [needsKey, electionKey]);
 
-  const handleVerify = () => {
-    if (voterId.trim()) {
-      // Simulate Voter Registry: Generate Identity + Decoys for Ring
-      try {
-        const identity = generateIdentity();
-        setVoterIdentity(identity);
-
-        // Generate decoys
-        const decoys = [];
-        for (let i = 0; i < ringSize - 1; i++) {
-          decoys.push(generateIdentity().publicKey);
-        }
-
-        // Create Ring (Shuffle voter into decoys)
-        const newRing = [...decoys, identity.publicKey].sort();
-        setRing(newRing);
-
-        setVerified(true);
-      } catch (e) {
-        console.error("Ring generation failed:", e);
-        setError("Failed to generate anonymous identity. Browser compatibility issue?");
-      }
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    if (!code.trim() || registering) return;
+    setRegistering(true);
+    setError(null);
+    try {
+      const fresh = generateIdentity();
+      await postJson("/api/election/register-key", { code, publicKey: fresh.publicKey });
+      saveIdentity(electionId, fresh);
+      setIdentityVersion((v) => v + 1);
+      setCode("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRegistering(false);
     }
   };
 
-  const handleSelect = (candidate) => {
-    setSelectedCandidate(candidate);
-    performEncryption(candidate);
+  const handleImport = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setError(null);
+    try {
+      saveIdentity(electionId, parseIdentityBackup(await file.text(), electionId));
+      setIdentityVersion((v) => v + 1);
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
-  const performEncryption = async (candidate) => {
-    if (!keyPair) return;
-    setIsEncrypting(true);
-
+  // Each selection starts a fresh encryption, clears the previous ciphertext
+  // and ignores stale results, so the ballot always matches the highlighted
+  // candidate (the Cast button stays disabled until the right one is ready).
+  const handleSelect = async (candidate) => {
+    if (submitting || !electionKey) return;
+    const seq = ++encryptSeq.current;
+    setSelected(candidate);
+    setCipher("");
+    setEncrypting(true);
+    setError(null);
     try {
-      const cipher = await encryptVote(candidate.id, keyPair.publicKey);
-      // Simulate delay for effect
-      setTimeout(() => {
-        setEncryptedVote(cipher);
-        setIsEncrypting(false);
-      }, 800);
-    } catch (err) {
-      console.error("Encryption failed:", err);
-      setError("Encryption failed. Please try again.");
-      setIsEncrypting(false);
+      const result = await encryptVote(candidate.id, electionKey.cryptoKey);
+      if (seq === encryptSeq.current) setCipher(result);
+    } catch {
+      if (seq === encryptSeq.current) setError("Encryption failed. Please try again.");
+    } finally {
+      if (seq === encryptSeq.current) setEncrypting(false);
     }
   };
 
   const handleSubmit = async () => {
-    if (!encryptedVote || !voterId || !voterIdentity) return;
-
-    setIsSubmitting(true);
+    if (!cipher || encrypting || submitting || !selected || !identity) return;
+    setSubmitting(true);
     setError(null);
-
     try {
-      // Sign with Ring Signature
-      // Message can be the encrypted vote
-      const signature = signVote(encryptedVote, voterIdentity, ring);
-
-      const payload = {
-        ballotId: crypto.randomUUID(),
-        electionId: "election-2025",
-        encryptedBallot: encryptedVote, // ciphertext of choiceId, encrypted with the election public key
-        signature: signature,
-        ring: ring,
-        previousHash: "GENESIS_HASH"
-      };
-
-      const response = await fetch(`${API_BASE}/api/votes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Vote submission failed");
+      // Sign over the server's frozen ring, never one of our own.
+      const ringRes = await fetch(`${API_BASE}/api/election/ring`);
+      const ringData = await ringRes.json().catch(() => ({}));
+      if (!ringRes.ok) throw new Error(ringData.error || "Could not load the voter ring.");
+      if (ringData.ringHash !== election.ringHash) throw new Error("The voter ring changed. Reload the page and try again.");
+      if (!ringData.ring.includes(identity.publicKey)) {
+        throw new Error("This browser's key is not in the voter ring. Register a key first, or import your key backup.");
       }
 
-      // Success
-      const finalizedHash = data.vote?.ballotId || data.transactionHash;
-
-      setReceipt({
-        id: finalizedHash,
-        hash: finalizedHash,
-        timestamp: new Date().toLocaleString(),
-        candidate: selectedCandidate.name,
-        ringSize: ring.length
+      const signature = signVote(cipher, identity, ringData.ring);
+      const data = await postJson("/api/votes", {
+        electionId: election.id,
+        encryptedBallot: cipher,
+        signature,
+        ringHash: ringData.ringHash,
       });
 
-      // Update local storage for Audit page convenience
-      localStorage.setItem("votesphere_lastBallot", JSON.stringify({
-        vote: {
-          transactionHash: finalizedHash,
-          encryptedBallot: encryptedVote,
-          castAt: new Date().toISOString()
-        }
-      }));
-
-      setStep(4);
+      rememberVoted(election.id, data.ballotId);
+      setReceipt({
+        id: data.ballotId,
+        timestamp: new Date(data.castAt).toLocaleString(),
+        candidate: selected.name,
+        ringSize: ringData.ring.length,
+      });
     } catch (err) {
-      console.error("Submission failed:", err);
       setError(err.message);
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false);
     }
   };
 
+  const muted = { color: "#94a3b8", lineHeight: 1.7 };
 
+  const renderBody = () => {
+    if (loading) return <GlassCard style={{ padding: "2rem" }}><p style={muted}>Loading election...</p></GlassCard>;
+    if (!election) {
+      return <GlassCard style={{ padding: "2rem" }}><p style={muted}>{electionError || "Election unavailable."}</p></GlassCard>;
+    }
+
+    if (receipt) {
+      return (
+        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}>
+          <TiltCard>
+            <div style={{ textAlign: "center", padding: "1rem" }}>
+              <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>✅</div>
+              <h3 className="text-gradient" style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>Vote Successfully Cast</h3>
+              <p style={muted}>Your ballot was encrypted, anonymously signed, and recorded.</p>
+            </div>
+
+            <div style={{ background: "white", padding: "2rem", borderRadius: "16px", display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem", color: "black", margin: "1rem 0" }}>
+              <QRCodeSVG value={`${window.location.origin}/audit?ballot=${receipt.id}`} size={180} />
+              <p style={{ fontSize: "0.9rem", color: "#666" }}>Scan to open your ballot on the audit page</p>
+            </div>
+
+            <div style={{ background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "12px", padding: "1rem", fontFamily: "monospace", fontSize: "0.85rem", wordBreak: "break-all" }}>
+              <div style={{ color: "#93c5fd" }}>Ballot ID</div>
+              <div style={{ color: "#4ade80", marginBottom: "0.75rem" }}>{receipt.id}</div>
+              <div style={{ color: "#93c5fd" }}>Anonymity set</div>
+              <div style={{ color: "#cbd5e1", marginBottom: "0.75rem" }}>Signed as one of {receipt.ringSize} registered voters</div>
+              <div style={{ color: "#93c5fd" }}>Recorded (rounded to 15 minutes)</div>
+              <div style={{ color: "#cbd5e1" }}>{receipt.timestamp}</div>
+            </div>
+            <p style={{ ...muted, fontSize: "0.85rem", marginTop: "1rem" }}>
+              Keep the Ballot ID. Anyone can look it up on the Audit page; it does not reveal your choice or your identity.
+            </p>
+          </TiltCard>
+        </motion.div>
+      );
+    }
+
+    if (status === "DRAFT") {
+      return (
+        <GlassCard style={{ padding: "2rem" }}>
+          <h3 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>Voting has not opened yet</h3>
+          <p style={muted}>
+            The Returning Officer issues each eligible member a personal voting code first, then opens key registration.
+            This page updates automatically.
+          </p>
+        </GlassCard>
+      );
+    }
+
+    if (status === "CLOSED") {
+      return (
+        <GlassCard style={{ padding: "2rem" }}>
+          <h3 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>Voting is closed</h3>
+          <p style={muted}>
+            {election.counts.ballots} ballots were cast. Check that yours was counted on the <a href="/audit" style={{ color: "#a5b4fc" }}>Audit page</a>.
+          </p>
+        </GlassCard>
+      );
+    }
+
+    if (votedBallot) {
+      return (
+        <GlassCard style={{ padding: "2rem" }}>
+          <h3 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>You have already voted</h3>
+          <p style={muted}>Your ballot ID is <span style={{ fontFamily: "monospace", color: "#4ade80", wordBreak: "break-all" }}>{votedBallot}</span>. You can verify it on the <a href="/audit" style={{ color: "#a5b4fc" }}>Audit page</a>.</p>
+        </GlassCard>
+      );
+    }
+
+    if (status === "REGISTRATION") {
+      if (identity) {
+        return (
+          <GlassCard style={{ padding: "2rem" }}>
+            <div className="badge badge-soft mb-3">STEP 1 OF 2 COMPLETE</div>
+            <h3 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>Your voting key is registered ✓</h3>
+            <p style={muted}>
+              Come back to this same browser when voting opens (this page updates by itself). Your private key never leaves
+              this device. To vote from another device, download the backup and keep it private: anyone holding it can vote as you.
+            </p>
+            <button className="btn btn-outline" style={{ marginTop: "1rem" }} onClick={() => downloadIdentityBackup(election.id, identity)}>
+              Download key backup
+            </button>
+          </GlassCard>
+        );
+      }
+      return (
+        <GlassCard style={{ padding: "2rem" }}>
+          <div className="badge badge-soft mb-3">STEP 1 OF 2 · REGISTER YOUR KEY</div>
+          <h3 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>Enter your personal voting code</h3>
+          <p style={{ ...muted, marginBottom: "1.25rem" }}>
+            Use the code the Returning Officer gave you (it looks like <span style={{ fontFamily: "monospace" }}>VS-XXXX-XXXX-XXXX-XXXX-XXXXX</span>).
+            It works once. Your browser creates a secret key that stays on this device; the code only proves you are eligible to register it.
+          </p>
+          <form onSubmit={handleRegister} style={{ display: "grid", gap: "1rem" }}>
+            <input
+              style={inputStyle}
+              placeholder="VS-XXXX-XXXX-XXXX-XXXX-XXXXX"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              disabled={registering}
+            />
+            <button className="btn btn-primary" type="submit" disabled={!code.trim() || registering} style={{ padding: "1rem" }}>
+              {registering ? "Registering..." : "Register my voting key"}
+            </button>
+          </form>
+          <label style={{ ...muted, fontSize: "0.85rem", display: "block", marginTop: "1.25rem" }}>
+            Already registered on another device? Import your key backup:{" "}
+            <input type="file" accept="application/json" onChange={handleImport} />
+          </label>
+        </GlassCard>
+      );
+    }
+
+    // status === "VOTING"
+    if (!identity) {
+      return (
+        <GlassCard style={{ padding: "2rem" }}>
+          <h3 style={{ fontSize: "1.25rem", marginBottom: "0.5rem" }}>No voting key on this browser</h3>
+          <p style={muted}>
+            Voting is open, and keys can no longer be registered. If you registered on another device, import your key backup here.
+          </p>
+          <label style={{ ...muted, display: "block", marginTop: "1rem" }}>
+            <input type="file" accept="application/json" onChange={handleImport} />
+          </label>
+        </GlassCard>
+      );
+    }
+
+    return (
+      <>
+        <GlassCard className="mb-4" style={{ padding: "2rem" }}>
+          <div className="badge badge-soft mb-3">STEP 2 OF 2 · CAST YOUR VOTE</div>
+          <h3 style={{ fontSize: "1.25rem", marginBottom: "1rem", fontWeight: 600 }}>{election.title}</h3>
+          <div style={{ display: "grid", gap: "1rem" }}>
+            {election.candidates.map((c) => {
+              const isSel = selected && selected.id === c.id;
+              return (
+                <motion.button
+                  key={c.id}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => handleSelect(c)}
+                  disabled={submitting || !electionKey}
+                  style={{
+                    width: "100%", padding: "1.25rem 1.5rem", textAlign: "left", borderRadius: "12px",
+                    border: isSel ? `2px solid ${c.color}` : "1px solid rgba(255,255,255,0.1)",
+                    background: isSel ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.05)",
+                    color: "white", cursor: "pointer",
+                  }}
+                >
+                  <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>{c.name}</div>
+                  {c.unitLabel && <div style={{ fontSize: "0.85rem", color: "#94a3b8" }}>Flat {c.unitLabel}</div>}
+                </motion.button>
+              );
+            })}
+          </div>
+          <button
+            className="btn btn-primary btn-lg"
+            style={{ width: "100%", padding: "1rem", fontSize: "1.1rem", marginTop: "2rem" }}
+            onClick={handleSubmit}
+            disabled={!cipher || encrypting || submitting}
+          >
+            {submitting ? "Signing & submitting..." : encrypting ? "Encrypting..." : "Cast Encrypted Vote"}
+          </button>
+        </GlassCard>
+
+        {selected && (
+          <TiltCard>
+            <div style={{ padding: "1rem" }}>
+              <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.5rem", display: "flex", alignItems: "center", gap: "10px" }}>
+                🔐 Encrypted on this device
+              </h3>
+              <div style={{ fontFamily: "monospace", fontSize: "0.85rem", background: "rgba(0,0,0,0.5)", padding: "1rem", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)" }}>
+                <div style={{ marginBottom: "0.5rem" }}><span style={{ color: "#a5b4fc" }}>choice</span> = <span style={{ color: "#4ade80" }}>{selected.name}</span></div>
+                <div style={{ marginBottom: "0.5rem" }}><span style={{ color: "#a5b4fc" }}>election_key</span> = <span style={{ color: "#fbbf24" }}>RSA-OAEP-4096 · {electionKey ? electionKey.fingerprint : "..."}</span></div>
+                <div><span style={{ color: "#a5b4fc" }}>ciphertext</span> = <span style={{ color: "#4ade80", wordBreak: "break-all" }}>{cipher || "Encrypting..."}</span></div>
+              </div>
+              <p style={{ ...muted, fontSize: "0.8rem", marginTop: "0.75rem" }}>
+                Only the ciphertext is sent. The server holds the election key and decrypts ballots in aggregate to count them.
+              </p>
+            </div>
+          </TiltCard>
+        )}
+      </>
+    );
+  };
 
   return (
     <ScrollLayout>
       <div className="container" style={{ paddingTop: "8rem", paddingBottom: "5rem", maxWidth: "800px" }}>
-
-        {/* Header Section */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center"
-          style={{ marginBottom: "3rem" }}
-        >
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="text-center" style={{ marginBottom: "3rem" }}>
           <div className="badge badge-primary mb-3">
-            Demo Only • Simulated Kiosk Flow
+            Demo Only • Fictional electorate{election ? ` • ${election.counts.registered} of ${election.counts.eligible} voters registered` : ""}
           </div>
-          <h2 className="section-title text-gradient" style={{ fontSize: "2.5rem", marginBottom: "1rem" }}>
-            VoteSphere Voting Portal
-          </h2>
-          <p className="text-muted" style={{ fontSize: "1.1rem", maxWidth: "600px", margin: "0 auto", lineHeight: "1.7" }}>
-            Experience the complete voter journey: identity verification, ballot
-            selection, and client‑side encryption before submission.
+          <h2 className="section-title text-gradient" style={{ fontSize: "2.5rem", marginBottom: "1rem" }}>VoteSphere Voting Portal</h2>
+          <p style={{ ...muted, fontSize: "1.05rem", maxWidth: "620px", margin: "0 auto" }}>
+            One flat, one vote. A personal voting code registers your secret key; your vote is encrypted on this device and signed
+            anonymously within the ring of all registered voters.
           </p>
         </motion.div>
 
-        {/* Global error banner */}
         <AnimatePresence>
           {error && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              style={{
-                marginBottom: 20,
-                padding: 15,
-                borderRadius: 12,
-                backgroundColor: "rgba(239, 68, 68, 0.1)",
-                border: "1px solid rgba(239, 68, 68, 0.3)",
-                color: "#fca5a5",
-                display: "flex",
-                alignItems: "center",
-                gap: "10px"
-              }}
+              initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+              style={{ marginBottom: 20, padding: 15, borderRadius: 12, backgroundColor: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#fca5a5" }}
             >
               ⚠️ {error}
             </motion.div>
           )}
         </AnimatePresence>
 
-        <AnimatePresence mode="wait">
-          {step < 3 ? (
-            <motion.div
-              key="voting-steps"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              transition={{ duration: 0.3 }}
-            >
-              {/* Step 1: Identity Verification */}
-              <GlassCard className="mb-4" style={{ padding: "2rem" }}>
-                <div className="badge badge-soft mb-3">STEP 1 OF 2</div>
-                <h3 style={{ fontSize: "1.25rem", marginBottom: "0.5rem", fontWeight: 600 }}>
-                  Identity Verification (Smart Card / Biometric)
-                </h3>
-                <p className="text-muted mb-4">
-                  In a real deployment, this step would authenticate via smart card reader or biometric scanner.
-                </p>
-
-                <div className="flex gap-4">
-                  <input
-                    className="input"
-                    style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.1)", color: "white" }}
-                    placeholder="Enter Voter ID (e.g., V12345)"
-                    value={voterId}
-                    onChange={(e) => setVoterId(e.target.value)}
-                    disabled={verified}
-                  />
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleVerify}
-                    disabled={!voterId.trim() || verified}
-                  >
-                    {verified ? "Verified ✓" : "Verify Identity"}
-                  </button>
-                </div>
-                <div className="info-row">
-                  <span className="label">Voter ID Hash:</span>
-                  <span className="value font-mono">
-                    {voterId ? btoa(voterId).substring(0, 12) + "..." : "---"}
-                  </span>
-                </div>
-                <div className="info-row">
-                  <span className="label">Anonymity Ring:</span>
-                  <span className="value font-mono">
-                    Active (Size: {ring.length})
-                  </span>
-                </div>
-                {verified && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    style={{
-                      marginTop: 15,
-                      padding: "10px 15px",
-                      borderRadius: 8,
-                      backgroundColor: "rgba(34, 197, 94, 0.1)",
-                      border: "1px solid rgba(34, 197, 94, 0.3)",
-                      color: "#86efac",
-                    }}
-                  >
-                    ✓ Voter verified successfully. You are eligible to cast <strong>one</strong> encrypted ballot.
-                  </motion.div>
-                )}
-              </GlassCard>
-
-              {/* Step 2: Ballot Selection */}
-              {verified && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                >
-                  <GlassCard className="mb-4" style={{ padding: "2rem" }}>
-                    <div className="badge badge-soft mb-3">STEP 2 OF 2</div>
-                    <h3 style={{ fontSize: "1.25rem", marginBottom: "1rem", fontWeight: 600 }}>
-                      Cast Your Vote – Society Chairperson Election 2026
-                    </h3>
-
-                    <div style={{ display: "grid", gap: "1rem" }}>
-                      {candidates.map((c) => {
-                        const sel = selectedCandidate && selectedCandidate.id === c.id;
-                        return (
-                          <motion.button
-                            key={c.id}
-                            whileHover={{ scale: 1.02, backgroundColor: "rgba(255,255,255,0.1)" }}
-                            whileTap={{ scale: 0.98 }}
-                            onClick={() => handleSelect(c)}
-                            style={{
-                              width: "100%",
-                              padding: "1.5rem",
-                              textAlign: "left",
-                              borderRadius: "12px",
-                              border: sel ? "2px solid var(--primary)" : "1px solid rgba(255,255,255,0.1)",
-                              background: sel ? "rgba(6, 182, 212, 0.1)" : "rgba(255,255,255,0.05)",
-                              color: "white",
-                              cursor: "pointer",
-                              transition: "all 0.2s"
-                            }}
-                          >
-                            <div style={{ fontSize: "1.1rem", fontWeight: 600, color: sel ? "var(--primary)" : "white" }}>
-                              {c.name}
-                            </div>
-                          </motion.button>
-                        );
-                      })}
-                    </div>
-
-                    <button
-                      className="btn btn-primary btn-lg mt-4 w-full"
-                      style={{ width: "100%", padding: "1rem", fontSize: "1.1rem", marginTop: "2rem" }}
-                      onClick={handleSubmit}
-                      disabled={isSubmitting || !selectedCandidate}
-                    >
-                      {isSubmitting ? "Encrypting & Submitting..." : "Cast Encrypted Vote"}
-                    </button>
-                  </GlassCard>
-                </motion.div>
-              )}
-
-              {/* Encryption Panel */}
-              {selectedCandidate && (
-                <TiltCard>
-                  <div style={{ padding: "1rem" }}>
-                    <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.5rem", display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      🔐 Client‑Side Encryption Panel
-                      <span className="badge badge-soft" style={{ fontSize: "0.7rem" }}>SERVER‑BLIND</span>
-                    </h3>
-                    <div style={{ fontFamily: "monospace", fontSize: "0.85rem", background: "rgba(0,0,0,0.5)", padding: "1rem", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)" }}>
-                      <div className="mb-2">
-                        <span style={{ color: "#a5b4fc" }}>choice</span> = <span style={{ color: "#4ade80" }}>{selectedCandidate.name}</span>
-                      </div>
-                      <div className="mb-2">
-                        <span style={{ color: "#a5b4fc" }}>public_key</span> = <span style={{ color: "#fbbf24" }}>"society-election-2026"</span>
-                      </div>
-                      <div>
-                        <span style={{ color: "#a5b4fc" }}>ciphertext</span> = <span style={{ color: "#4ade80", wordBreak: "break-all" }}>{encryptedVote || "Encrypting..."}</span>
-                      </div>
-                    </div>
-                  </div>
-                </TiltCard>
-              )}
-            </motion.div>
-          ) : (
-            /* Vote Receipt with QR Code */
-            <motion.div
-              key="receipt"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ type: "spring", bounce: 0.5 }}
-            >
-              <TiltCard>
-                <div style={{ textAlign: "center", padding: "1rem" }}>
-                  <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>✅</div>
-                  <h3 className="text-gradient" style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>Vote Successfully Cast</h3>
-                  <p className="text-muted mb-4">Your vote has been signed, encrypted, and anchored to the ledger.</p>
-                </div>
-
-                <div style={{ background: "white", padding: "2rem", borderRadius: "16px", display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem", color: "black" }}>
-                  <QRCodeSVG value={receipt?.vote?.ballotId || "void"} size={180} />
-                  <p style={{ fontSize: "0.9rem", color: "#666" }}>Scan to Verify on Mobile</p>
-                </div>
-
-                <div className="mt-4 p-4 rounded bg-black/50 border border-white/10 font-mono text-sm break-all">
-                  <div className="text-blue-300 mb-1">Ballot ID:</div>
-                  <div className="text-green-400">{receipt?.id}</div>
-                  <div className="text-blue-300 mt-2 mb-1">Ring Signature:</div>
-                  <div className="text-gray-400">Verified (Ring Size: {receipt?.ringSize})</div>
-                  <div className="text-blue-300 mt-2 mb-1">Receipt Hash:</div>
-                  <div className="text-gray-400" style={{ wordBreak: "break-all" }}>{receipt?.hash}</div>
-                </div>
-
-                <button
-                  className="btn btn-outline mt-6 w-full"
-                  style={{ width: "100%", padding: "1rem" }}
-                  onClick={() => window.location.reload()}
-                >
-                  Return to Kiosk Home
-                </button>
-              </TiltCard>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {renderBody()}
       </div>
     </ScrollLayout>
   );

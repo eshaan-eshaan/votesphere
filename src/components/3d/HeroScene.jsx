@@ -100,7 +100,7 @@ const VotingConcept = ({ isLightMode }) => {
             <Html position={[-2.2, 0, 0]} center style={labelStyle}>
                 <div>
                     <div style={{ color: isLightMode ? "#4f46e5" : "#a5b4fc" }}>📦 Ballot Box</div>
-                    <div style={subLabelStyle}>Tamper-Proof</div>
+                    <div style={subLabelStyle}>Ciphertext Only</div>
                 </div>
             </Html>
 
@@ -157,7 +157,7 @@ const VotingConcept = ({ isLightMode }) => {
                     <Html position={[0.95, 0, 0]} center style={labelStyle}>
                         <div>
                             <div style={{ color: "#0891b2" }}>📄 Your Vote</div>
-                            <div style={subLabelStyle}>AES-256</div>
+                            <div style={subLabelStyle}>RSA-OAEP</div>
                         </div>
                     </Html>
                 </group>
@@ -171,8 +171,8 @@ const VotingConcept = ({ isLightMode }) => {
 
             <Html position={[2.3, 0.3, 0]} center style={labelStyle}>
                 <div>
-                    <div style={{ color: isLightMode ? "#4f46e5" : "#818cf8" }}>🔄 Blockchain</div>
-                    <div style={subLabelStyle}>Immutable</div>
+                    <div style={{ color: isLightMode ? "#4f46e5" : "#818cf8" }}>🔄 Ring Signature</div>
+                    <div style={subLabelStyle}>Anonymous</div>
                 </div>
             </Html>
 

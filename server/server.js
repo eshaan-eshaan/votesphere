@@ -6,18 +6,19 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const cookieParser = require("cookie-parser");
 const prisma = require("./db");
-const lrs = require("lrs");
-const { getPublicKeyJwk, decryptChoice } = require("./election-keys");
-
+const { decryptChoice } = require("./election-keys");
+const electionConfig = require("./election-config");
+const { seedRegistry } = require("./seed/load-registry");
 
 // Import routes
 const authRoutes = require("./routes/auth");
-const { authenticate, optionalAuth } = require("./middleware/auth");
+const electionRoutes = require("./routes/election");
+const voteRoutes = require("./routes/votes");
+const { authenticate } = require("./middleware/auth");
 
 const app = express();
 // Trust proxy - required for express-rate-limit behind Render's reverse proxy
-app.set('trust proxy', 1);
-// const prisma = new PrismaClient(); // Removed as it is now imported from ./db
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 5000;
 
 // ---------- Security Middleware ----------
@@ -37,10 +38,22 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// Rate limiting - Prevent brute force
+// Body parsing. A vote carries a ring signature (about 200 bytes per ring
+// member), so 64 KB leaves room for a ring of a few hundred voters.
+app.use(express.json({ limit: "64kb" }));
+app.use(cookieParser());
+
+// ---------- Routes ----------
+
+// Health check (public, not rate limited)
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Rate limiting - applies to the API only, so static assets never count.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per window
+  max: 300,
   message: {
     ok: false,
     error: "Too many requests. Please try again later."
@@ -48,168 +61,38 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false
 });
-app.use(limiter);
+app.use("/api", limiter);
 
-// Stricter rate limit for auth routes
+// Stricter limit on auth routes against password guessing. Only FAILED
+// attempts count, and /me (called on every page load) is exempt.
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 auth attempts per window
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: {
     ok: false,
-    error: "Too many login attempts. Please try again in 15 minutes."
+    error: "Too many failed attempts. Please try again in 15 minutes."
   }
 });
+app.use(
+  "/api/auth",
+  (req, res, next) => (req.path === "/me" ? next() : authLimiter(req, res, next)),
+  authRoutes
+);
 
-// Body parsing with size limits
-app.use(express.json({ limit: "10kb" }));
-app.use(cookieParser());
+app.use("/api/election", electionRoutes);
+app.use("/api/votes", voteRoutes);
 
-// ---------- Error Handlers ----------
-
-// JSON parse errors
-app.use((err, req, res, next) => {
-  if (err instanceof SyntaxError && "body" in err) {
-    console.error("Invalid JSON body:", err.message);
-    return res.status(400).json({
-      ok: false,
-      error: "Invalid JSON in request body"
-    });
-  }
-  next(err);
-});
-
-// ---------- Routes ----------
-
-// Health check (public)
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
-});
-
-// Auth routes (with stricter rate limiting)
-app.use("/api/auth", authLimiter, authRoutes);
-
-// Election public key (public) - clients encrypt their ballot choice with
-// this before signing and submitting it. The matching private key never
-// leaves the server; see server/election-keys.js.
-app.get("/api/election/public-key", (req, res) => {
-  res.json({ publicKey: getPublicKeyJwk() });
-});
-
-// ---------- Vote Routes ----------
-
-// Get all votes (optionally authenticated - shows more data if authenticated)
-app.get("/api/votes", optionalAuth, async (req, res) => {
-  try {
-    const votes = await prisma.vote.findMany({
-      orderBy: { castAt: "desc" },
-      take: 100 // Limit to last 100 votes for performance
-    });
-
-    // If authenticated, include more details
-    if (req.admin) {
-      res.json(votes);
-    } else {
-      // Public view - hide some sensitive fields
-      const publicVotes = votes.map(v => ({
-        ballotId: v.ballotId,
-        electionId: v.electionId,
-        encryptedBallot: v.encryptedBallot,
-        signature: v.signature,
-        keyImage: v.keyImage,
-        ringSize: v.ringSize,
-        castAt: v.castAt
-      }));
-      res.json(publicVotes);
-    }
-  } catch (error) {
-    console.error("Error fetching votes:", error);
-    res.status(500).json({ ok: false, error: "Failed to fetch votes." });
-  }
-});
-
-// Create a new vote (public - voters submit here)
-// Create a new vote (public - voters submit here)
-app.post("/api/votes", async (req, res) => {
-  try {
-    const {
-      electionId,
-      encryptedBallot, // ciphertext of the choice, encrypted client-side with the election public key
-      signature,
-      ring,
-      voterIdHash // Optional now
-    } = req.body || {};
-
-    // Validation
-    const errors = [];
-    if (!electionId) errors.push("electionId is required.");
-    if (!encryptedBallot) errors.push("encryptedBallot is required.");
-    if (!signature) errors.push("Ring signature is required.");
-    if (!ring || !Array.isArray(ring)) errors.push("Ring public keys are required.");
-
-    if (errors.length > 0) {
-      return res.status(400).json({ ok: false, error: "Invalid vote payload.", details: errors });
-    }
-
-    // 1. Verify Ring Signature
-    try {
-      const isValid = lrs.verify(ring, signature, encryptedBallot);
-      if (!isValid) {
-        return res.status(400).json({ ok: false, error: "Invalid Ring Signature. Authentication failed." });
-      }
-    } catch (e) {
-      console.error("Signature verification error:", e);
-      return res.status(400).json({ ok: false, error: "Malformed signature or ring." });
-    }
-
-    // 2. Extract Key Image (Linkability Tag)
-    const parts = signature.split("_");
-    if (!parts || parts.length < 2) {
-      return res.status(400).json({ ok: false, error: "Invalid signature format." });
-    }
-    const keyImage = parts[0];
-
-    // 3. Double Voting Check (Linkability)
-    const existingVote = await prisma.vote.findUnique({
-      where: { keyImage }
-    });
-
-    if (existingVote) {
-      console.warn(`Double voting attempt detected! Key Image: ${keyImage}`);
-      return res.status(409).json({ ok: false, error: "Double voting detected. This identity has already cast a vote." });
-    }
-
-    // Create vote
-    const ballotId = `ballot_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-
-    const vote = await prisma.vote.create({
-      data: {
-        ballotId,
-        electionId: electionId.trim(),
-        encryptedBallot: encryptedBallot.trim(),
-        voterIdHash: voterIdHash || "ANONYMOUS_RING_MEMBER",
-        signature: signature,
-        keyImage: keyImage,
-        ringSize: ring.length,
-        castAt: new Date()
-      }
-    });
-
-    console.log(`Vote recorded: ${ballotId} (Ring Size: ${ring.length})`);
-
-    return res.status(201).json({ ok: true, vote, transactionHash: vote.ballotId });
-  } catch (error) {
-    console.error("Error storing vote:", error);
-    return res.status(500).json({
-      ok: false,
-      error: "Failed to record vote."
-    });
-  }
-});
-
-// Get vote statistics (authenticated only)
+// Aggregate results (authenticated only). Ballots are decrypted on the server,
+// in aggregate, purely to tally them; no per-ballot choice is ever returned.
 app.get("/api/stats", authenticate, async (req, res) => {
   try {
-    const votes = await prisma.vote.findMany();
+    const votes = await prisma.vote.findMany({
+      where: { electionId: electionConfig.ELECTION_ID },
+      select: { encryptedBallot: true }
+    });
     const counts = {};
     let undecryptable = 0;
 
@@ -217,8 +100,8 @@ app.get("/api/stats", authenticate, async (req, res) => {
       try {
         const choice = decryptChoice(v.encryptedBallot);
         counts[choice] = (counts[choice] || 0) + 1;
-      } catch (e) {
-        // Ballot encrypted under a previous (now-rotated) election key, or malformed.
+      } catch {
+        // Encrypted under a previous (now-rotated) election key.
         undecryptable++;
       }
     }
@@ -232,29 +115,6 @@ app.get("/api/stats", authenticate, async (req, res) => {
   } catch (error) {
     console.error("Error fetching stats:", error);
     res.status(500).json({ ok: false, error: "Failed to fetch stats." });
-  }
-});
-
-// Delete all votes (superadmin only - for testing)
-app.delete("/api/votes", authenticate, async (req, res) => {
-  try {
-    if (req.admin.role !== "superadmin") {
-      return res.status(403).json({
-        ok: false,
-        error: "Only superadmin can delete votes."
-      });
-    }
-
-    const result = await prisma.vote.deleteMany();
-    console.log(`All votes deleted by ${req.admin.email}`);
-
-    res.json({
-      ok: true,
-      message: `Deleted ${result.count} votes.`
-    });
-  } catch (error) {
-    console.error("Error deleting votes:", error);
-    res.status(500).json({ ok: false, error: "Failed to delete votes." });
   }
 });
 
@@ -276,9 +136,22 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-// ---------- Fallback Error Handler ----------
+// ---------- Error Handler ----------
 
 app.use((err, req, res, next) => {
+  const status = err.status || err.statusCode;
+
+  if (err instanceof SyntaxError && "body" in err) {
+    return res.status(400).json({ ok: false, error: "Invalid JSON in request body" });
+  }
+  // Client errors raised by middleware (e.g. 413 body too large) keep their status.
+  if (status >= 400 && status < 500) {
+    return res.status(status).json({
+      ok: false,
+      error: status === 413 ? "Request body too large." : "Bad request."
+    });
+  }
+
   console.error("Unhandled server error:", err);
   res.status(500).json({
     ok: false,
@@ -299,15 +172,17 @@ process.on("SIGTERM", async () => {
 // ---------- Start Server ----------
 
 app.listen(PORT, async () => {
-  console.log(`\n🗳️  VoteSphere API running at http://localhost:${PORT}`);
-  console.log(`📊 Environment: ${process.env.NODE_ENV || "development"}`);
-  console.log(`🔒 CORS Origin: ${process.env.CORS_ORIGIN || "http://localhost:5173"}\n`);
+  console.log(`\nVoteSphere API running at http://localhost:${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log(`CORS Origin: ${process.env.CORS_ORIGIN || "http://localhost:5173"}\n`);
 
   try {
     const adminCount = await prisma.admin.count();
-    console.log(`✅ Database connected. Admin count: ${adminCount}`);
+    console.log(`Database connected. Admin count: ${adminCount}`);
+    const { seeded } = await seedRegistry(prisma, electionConfig);
+    console.log(seeded > 0 ? `Seeded ${seeded} synthetic voters.` : "Voter roll already present.");
   } catch (err) {
-    console.error("❌ Database connection failed:", err);
+    console.error("Database setup failed:", err);
   }
 
   // Keep process alive

@@ -22,7 +22,7 @@ const Navbar = () => {
       to: "/audit",
       label: t("navAudit"),
       icon: "🔍",
-      tooltip: "Public page to verify ballot hashes and inspect the tamper-proof ledger."
+      tooltip: "Public page to verify your ballot ID and inspect the public ballot ledger."
     },
     { to: "/architecture", label: t("navArchitecture"), icon: "🏗️" },
     { to: "/admin-login", label: "Admin", icon: "🛡️" },

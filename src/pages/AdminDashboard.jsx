@@ -1,17 +1,47 @@
-import React, { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { importSigningKey, verifySignature } from "../utils/crypto";
+import { motion } from "framer-motion";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../components/ThemeContext";
+import { useElection } from "../hooks/useElection";
 import { API_BASE } from "../config";
-import { candidates } from "../data/candidates";
-
-// const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
-
-import { motion } from "framer-motion";
 import ScrollLayout from "../components/ui/ScrollLayout";
 import GlassCard from "../components/ui/GlassCard";
 import TiltCard from "../components/ui/TiltCard";
+
+const PHASES = [
+  { id: "DRAFT", label: "Setup" },
+  { id: "REGISTRATION", label: "Key registration" },
+  { id: "VOTING", label: "Voting" },
+  { id: "CLOSED", label: "Closed" },
+];
+
+const api = async (path, options = {}) => {
+  const res = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+};
+
+const downloadCsv = (rows, filename) => {
+  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const cols = Object.keys(rows[0]);
+  const csv = [cols.join(","), ...rows.map((r) => cols.map((c) => esc(r[c])).join(","))].join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+const th = { padding: "0 1rem", fontWeight: 600 };
+const td = { padding: "0.75rem 1rem" };
+const muted = { color: "#94a3b8" };
 
 const AdminDashboard = () => {
   const { admin, logout } = useAuth();
@@ -19,104 +49,105 @@ const AdminDashboard = () => {
   const navigate = useNavigate();
   const isLight = theme === "light";
 
-  const [total] = useState(150);
-  const [cast, setCast] = useState(0);
-  const [turnout, setTurnout] = useState(0);
-  const [votes, setVotes] = useState([]);
-  const [verificationStatus, setVerificationStatus] = useState({});
+  const { election, refresh: refreshElection } = useElection(10000);
+  const [adminStatus, setAdminStatus] = useState(null);
+  const [members, setMembers] = useState([]);
   const [results, setResults] = useState(null);
-  const [resultsError, setResultsError] = useState("");
+  const [ballots, setBallots] = useState([]);
+  const [sheet, setSheet] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState(null); // { kind: "ok" | "error", text }
+
+  const isSuperadmin = admin?.role === "superadmin";
+
+  const loadAll = useCallback(async () => {
+    try {
+      const [status, roll, stats, votes] = await Promise.all([
+        api("/api/election/admin/status"),
+        api("/api/election/admin/members"),
+        api("/api/stats"),
+        api("/api/votes"),
+      ]);
+      setAdminStatus(status);
+      setMembers(roll.members);
+      setResults(stats);
+      setBallots(votes);
+    } catch (err) {
+      setMessage({ kind: "error", text: err.message });
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAll();
+    const id = setInterval(loadAll, 10000);
+    return () => clearInterval(id);
+  }, [loadAll]);
+
+  const run = async (label, fn) => {
+    setBusy(label);
+    setMessage(null);
+    try {
+      await fn();
+      await Promise.all([loadAll(), refreshElection()]);
+    } catch (err) {
+      setMessage({ kind: "error", text: err.message });
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const issueCodes = () =>
+    run("issue", async () => {
+      const data = await api("/api/election/admin/issue-codes", { method: "POST", body: "{}" });
+      if (data.issued.length > 0) setSheet(data.issued);
+      setMessage({
+        kind: "ok",
+        text: data.issued.length > 0
+          ? `${data.issued.length} voting codes issued. They are shown below ONCE - download the sheet now.`
+          : "Every eligible member already has a code.",
+      });
+    });
+
+  const changePhase = (to) =>
+    run(to, async () => {
+      await api("/api/election/admin/phase", { method: "POST", body: JSON.stringify({ to }) });
+      setMessage({ kind: "ok", text: `Election is now in the ${to} phase.` });
+    });
+
+  const resetElection = () => {
+    if (!window.confirm("Wipe all codes, registered keys and ballots and return to Setup?")) return;
+    run("reset", async () => {
+      await api("/api/election/admin/reset", { method: "POST", body: JSON.stringify({ confirm: "RESET" }) });
+      setSheet(null);
+      setMessage({ kind: "ok", text: "Election reset." });
+    });
+  };
 
   const handleLogout = async () => {
     await logout();
     navigate("/admin-login");
   };
 
-  useEffect(() => {
-    async function fetchVotes() {
-      try {
-        const res = await fetch(`${API_BASE}/api/votes`);
-        if (!res.ok) throw new Error("Failed to fetch votes");
-        const data = await res.json();
-
-        if (Array.isArray(data)) {
-          setVotes(data);
-          setCast(data.length);
-          verifyAllVotes(data);
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    }
-
-    fetchVotes();
-  }, []);
-
-  useEffect(() => {
-    async function fetchResults() {
-      try {
-        const res = await fetch(`${API_BASE}/api/stats`, { credentials: "include" });
-        if (!res.ok) throw new Error("Failed to fetch results");
-        const data = await res.json();
-        setResults(data);
-      } catch (err) {
-        console.error(err);
-        setResultsError("Could not load results. The server decrypts ballots on demand for tallying - try again shortly.");
-      }
-    }
-
-    fetchResults();
-  }, []);
-
-  const verifyAllVotes = (voteList) => {
-    // In a full implementation, we would verify ring signatures client-side here.
-    // For this demo, we rely on the server's verification and display the Ring Size.
-    const statusMap = {};
-
-    for (const vote of voteList) {
-      if (vote.signature && vote.ringSize) {
-        statusMap[vote.ballotId] = `Ring Signed (1 of ${vote.ringSize})`;
-      } else {
-        statusMap[vote.ballotId] = "Unsigned / Legacy";
-      }
-    }
-    setVerificationStatus(statusMap);
-  };
-
-  useEffect(() => {
-    const target =
-      total > 0 ? Math.round((cast / total) * 100) : 0;
-    let current = 0;
-    const id = setInterval(() => {
-      current += 1;
-      if (current >= target) {
-        current = target;
-        clearInterval(id);
-      }
-      setTurnout(current);
-    }, 20);
-    return () => clearInterval(id);
-  }, [cast, total]);
+  const status = election?.status;
+  const counts = election?.counts;
+  const issued = adminStatus?.issued ?? 0;
+  const turnout = counts && counts.eligible > 0 ? Math.round((counts.ballots / counts.eligible) * 100) : 0;
+  const phaseIndex = PHASES.findIndex((p) => p.id === status);
+  const canFreeze = counts && election && counts.registered >= election.minRingSize;
+  const cardText = isLight ? "#1e293b" : "white";
 
   return (
     <ScrollLayout>
       <div className="container" style={{ paddingTop: "6rem", paddingBottom: "4rem" }}>
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-5"
-        >
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem" }}>
             <div>
               <div className="badge badge-primary mb-3">
-                Admin View • {admin?.email || "Authenticated"}
+                Returning Officer • {admin?.email || "Authenticated"}{isSuperadmin ? " • superadmin" : ""}
               </div>
-              <h2 className="section-title text-gradient" style={{ fontSize: "2.5rem" }}>
-                Election Control Center
-              </h2>
+              <h2 className="section-title text-gradient" style={{ fontSize: "2.5rem" }}>Election Control Center</h2>
               <p className="text-muted" style={{ maxWidth: "800px" }}>
-                Real‑time monitoring of encrypted ballots, turnout metrics, and the tamper‑proof ledger.
+                {election ? election.title : "Loading election..."} — issue voting codes, run the phases, and watch the tally.
               </p>
             </div>
             <motion.button
@@ -124,15 +155,9 @@ const AdminDashboard = () => {
               whileTap={{ scale: 0.98 }}
               onClick={handleLogout}
               style={{
-                padding: "0.75rem 1.5rem",
-                borderRadius: "12px",
+                padding: "0.75rem 1.5rem", borderRadius: "12px", fontSize: "0.9rem", fontWeight: 600, cursor: "pointer",
                 background: isLight ? "rgba(239, 68, 68, 0.1)" : "rgba(239, 68, 68, 0.2)",
-                border: "1px solid rgba(239, 68, 68, 0.3)",
-                color: "#f87171",
-                fontSize: "0.9rem",
-                fontWeight: 600,
-                cursor: "pointer",
-                transition: "all 0.2s ease"
+                border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171",
               }}
             >
               🚪 Logout
@@ -140,55 +165,152 @@ const AdminDashboard = () => {
           </div>
         </motion.div>
 
-        {/* Stats Grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "1.5rem", marginBottom: "3rem" }}>
+        {message && (
+          <div style={{
+            marginBottom: "1.5rem", padding: "0.85rem 1rem", borderRadius: "10px",
+            background: message.kind === "ok" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+            border: `1px solid ${message.kind === "ok" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+            color: message.kind === "ok" ? "#4ade80" : "#fca5a5",
+          }}>
+            {message.text}
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1.5rem", marginBottom: "3rem" }}>
           <TiltCard delay={0}>
-            <div className="text-muted text-sm mb-2">Total Registered Voters</div>
-            <div style={{ fontSize: "2.5rem", fontWeight: 700 }}>{total}</div>
-            <div className="text-green-400 text-sm">100% Eligible</div>
+            <div className="text-muted text-sm mb-2">Eligible voters</div>
+            <div style={{ fontSize: "2.5rem", fontWeight: 700 }}>{counts ? counts.eligible : "-"}</div>
+            <div className="text-muted text-sm">of {counts ? counts.onRoll : "-"} flats on the roll</div>
           </TiltCard>
           <TiltCard delay={0.1}>
-            <div className="text-muted text-sm mb-2">Encrypted Votes Cast</div>
-            <div style={{ fontSize: "2.5rem", fontWeight: 700 }}>{cast}</div>
-            <div className="text-blue-400 text-sm">Live Updates</div>
+            <div className="text-muted text-sm mb-2">Codes issued / keys registered</div>
+            <div style={{ fontSize: "2.5rem", fontWeight: 700 }}>{issued} / {counts ? counts.registered : "-"}</div>
+            <div className="text-muted text-sm">one code per eligible member</div>
           </TiltCard>
           <TiltCard delay={0.2}>
-            <div className="text-muted text-sm mb-2">Voter Turnout</div>
+            <div className="text-muted text-sm mb-2">Ballots cast</div>
+            <div style={{ fontSize: "2.5rem", fontWeight: 700 }}>{counts ? counts.ballots : "-"}</div>
+            <div className="text-muted text-sm">anonymous, ring-signed</div>
+          </TiltCard>
+          <TiltCard delay={0.3}>
+            <div className="text-muted text-sm mb-2">Turnout</div>
             <div style={{ fontSize: "2.5rem", fontWeight: 700, color: "#4ade80" }}>{turnout}%</div>
-            <div className="text-muted text-sm">Real-time tracking</div>
+            <div className="text-muted text-sm">ballots / eligible voters</div>
           </TiltCard>
         </div>
 
         <div style={{ display: "grid", gap: "2rem" }}>
-          {/* Results by Candidate */}
+          {/* Election control */}
+          <GlassCard>
+            <h3 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "1rem" }}>Election phase</h3>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1.25rem" }}>
+              {PHASES.map((p, i) => (
+                <span key={p.id} style={{
+                  padding: "0.4rem 0.9rem", borderRadius: "99px", fontSize: "0.85rem", fontWeight: 600,
+                  background: i === phaseIndex ? "rgba(99,102,241,0.25)" : "rgba(148,163,184,0.1)",
+                  color: i === phaseIndex ? "#a5b4fc" : i < phaseIndex ? "#4ade80" : "#94a3b8",
+                  border: `1px solid ${i === phaseIndex ? "rgba(99,102,241,0.5)" : "rgba(148,163,184,0.2)"}`,
+                }}>
+                  {i < phaseIndex ? "✓ " : ""}{p.label}
+                </span>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+              {(status === "DRAFT" || status === "REGISTRATION") && (
+                <button className="btn btn-outline" onClick={issueCodes} disabled={!!busy}>
+                  {busy === "issue" ? "Issuing..." : "Issue voting codes"}
+                </button>
+              )}
+              {status === "DRAFT" && (
+                <button className="btn btn-primary" onClick={() => changePhase("REGISTRATION")} disabled={!!busy || issued === 0}>
+                  Open key registration
+                </button>
+              )}
+              {status === "REGISTRATION" && (
+                <button className="btn btn-primary" onClick={() => changePhase("VOTING")} disabled={!!busy || !canFreeze}>
+                  Freeze ring &amp; open voting
+                </button>
+              )}
+              {status === "VOTING" && (
+                <button className="btn btn-primary" onClick={() => changePhase("CLOSED")} disabled={!!busy}>
+                  Close voting
+                </button>
+              )}
+              {isSuperadmin && (
+                <button className="btn btn-outline" onClick={resetElection} disabled={!!busy} style={{ color: "#f87171" }}>
+                  Reset election
+                </button>
+              )}
+            </div>
+            <p className="text-muted text-sm" style={{ marginTop: "1rem" }}>
+              {status === "DRAFT" && "Issue a personal voting code to every eligible member, then open key registration."}
+              {status === "REGISTRATION" && `Voters register their keys with their codes. Voting can open once at least ${election?.minRingSize} keys are registered; opening it freezes the ring, so no more keys can join.`}
+              {status === "VOTING" && `Ring frozen (${counts?.registered} voters, fingerprint ${election?.ringHash?.slice(0, 12)}...). Close voting when the poll ends.`}
+              {status === "CLOSED" && "Voting is closed. Results below are final."}
+            </p>
+          </GlassCard>
+
+          {/* Distribution sheet (simulated email) */}
+          {sheet && (
+            <GlassCard>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem", marginBottom: "1rem" }}>
+                <div>
+                  <h3 style={{ fontSize: "1.25rem", fontWeight: 600 }}>Voting code distribution sheet</h3>
+                  <p className="text-muted text-sm">
+                    Email delivery is simulated: hand each member their code. Codes are shown once and only their hashes are stored, so this sheet cannot be regenerated.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <button className="btn btn-primary" onClick={() => downloadCsv(
+                    sheet.map((s) => ({ membership_no: s.membershipNo, name: s.fullName, flat: s.unitLabel, aadhaar: s.aadhaarMasked, phone: s.phoneMasked, voting_code: s.code })),
+                    "voting-code-sheet.csv"
+                  )}>Download CSV</button>
+                  <button className="btn btn-outline" onClick={() => setSheet(null)}>Hide</button>
+                </div>
+              </div>
+              <div style={{ overflowX: "auto", maxHeight: "320px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem", color: cardText }}>
+                  <thead>
+                    <tr style={{ textAlign: "left", ...muted }}>
+                      <th style={th}>Member</th><th style={th}>Name</th><th style={th}>Flat</th><th style={th}>Aadhaar</th><th style={th}>Phone</th><th style={th}>Voting code</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sheet.map((s) => (
+                      <tr key={s.membershipNo} style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
+                        <td style={td}>{s.membershipNo}</td>
+                        <td style={td}>{s.fullName}</td>
+                        <td style={td}>{s.unitLabel}</td>
+                        <td style={{ ...td, fontFamily: "monospace" }}>{s.aadhaarMasked}</td>
+                        <td style={{ ...td, fontFamily: "monospace" }}>{s.phoneMasked}</td>
+                        <td style={{ ...td, fontFamily: "monospace", color: "#4ade80" }}>{s.code}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </GlassCard>
+          )}
+
+          {/* Results */}
           <GlassCard>
             <div style={{ marginBottom: "1.5rem" }}>
-              <h3 style={{ fontSize: "1.25rem", fontWeight: 600 }}>Results by Candidate</h3>
+              <h3 style={{ fontSize: "1.25rem", fontWeight: 600 }}>Results by candidate</h3>
               <p className="text-muted text-sm">
-                Decrypted server-side, on demand, from election-key-encrypted ballots — individual votes stay ciphertext at rest.
+                Ballots are decrypted on the server, in aggregate, to tally them. No individual choice is ever shown.
               </p>
             </div>
-
-            {resultsError && (
-              <div className="p-3 rounded bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
-                ⚠ {resultsError}
-              </div>
-            )}
-
-            {!resultsError && !results && (
-              <div className="text-muted text-sm">Loading results...</div>
-            )}
-
-            {results && (
+            {!results && <div className="text-muted text-sm">Loading results...</div>}
+            {results && election && (
               <div style={{ display: "grid", gap: "0.75rem" }}>
-                {candidates.map((c) => {
+                {election.candidates.map((c) => {
                   const count = results.byChoice?.[c.id] || 0;
                   const pct = results.total > 0 ? Math.round((count / results.total) * 100) : 0;
                   return (
                     <div key={c.id}>
                       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.25rem", fontSize: "0.9rem" }}>
-                        <span>{c.name} <span className="text-muted">({c.party})</span></span>
-                        <span style={{ fontWeight: 600 }}>{count} votes</span>
+                        <span>{c.name} <span className="text-muted">(Flat {c.unitLabel})</span></span>
+                        <span style={{ fontWeight: 600 }}>{count} votes · {pct}%</span>
                       </div>
                       <div style={{ height: "8px", borderRadius: "99px", background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
                         <div style={{ height: "100%", width: `${pct}%`, background: c.color, borderRadius: "99px", transition: "width 0.4s ease" }} />
@@ -197,121 +319,68 @@ const AdminDashboard = () => {
                   );
                 })}
                 {results.undecryptable > 0 && (
-                  <div className="text-muted text-sm" style={{ marginTop: "0.5rem" }}>
-                    {results.undecryptable} ballot(s) could not be decrypted (encrypted under a rotated election key).
-                  </div>
+                  <div className="text-muted text-sm">{results.undecryptable} ballot(s) could not be decrypted (encrypted under a rotated election key).</div>
                 )}
               </div>
             )}
           </GlassCard>
 
-          {/* Live Feed */}
+          {/* Ballot feed */}
           <GlassCard>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
-              <div>
-                <h3 style={{ fontSize: "1.25rem", fontWeight: 600 }}>Live Ballot Feed</h3>
-                <p className="text-muted text-sm">Real-time cryptographic verification of incoming votes.</p>
-              </div>
-              <div className="badge badge-soft" style={{ background: "rgba(6,182,212,0.1)", color: "#06b6d4" }}>
-                ● Live Syncing
-              </div>
-            </div>
-
+            <h3 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "0.25rem" }}>Latest ballots</h3>
+            <p className="text-muted text-sm" style={{ marginBottom: "1rem" }}>
+              Ballot times are rounded to 15 minutes so they cannot be matched to key registrations. The list refreshes every 10 seconds.
+            </p>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "0 0.5rem", fontSize: "0.9rem" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem", color: cardText }}>
                 <thead>
-                  <tr style={{ textAlign: "left", color: "#94a3b8" }}>
-                    <th style={{ padding: "0 1rem" }}>Time</th>
-                    <th style={{ padding: "0 1rem" }}>Ballot ID (Hash)</th>
-                    <th style={{ padding: "0 1rem" }}>Key Image (Link Tag)</th>
-                    <th style={{ padding: "0 1rem" }}>Signature Status</th>
+                  <tr style={{ textAlign: "left", ...muted }}>
+                    <th style={th}>Time (rounded)</th><th style={th}>Ballot ID</th><th style={th}>Key image (link tag)</th><th style={th}>Ring</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {votes.slice().reverse().slice(0, 10).map((vote) => {
-                    const status = verificationStatus[vote.ballotId];
-                    let badgeColor = "#94a3b8";
-                    let badgeBg = "rgba(148,163,184,0.1)";
-                    let label = "Checking...";
-
-                    if (status === "valid") {
-                      badgeColor = "#4ade80";
-                      badgeBg = "rgba(74, 222, 128, 0.1)";
-                      label = "✅ Verified Valid";
-                    } else if (status === "invalid") {
-                      badgeColor = "#f87171";
-                      badgeBg = "rgba(248, 113, 113, 0.1)";
-                      label = "❌ Invalid Signature";
-                    } else if (status === "unsigned") {
-                      badgeColor = "#fbbf24";
-                      badgeBg = "rgba(251, 191, 36, 0.1)";
-                      label = "⚠ Unsigned";
-                    }
-
-                    return (
-                      <tr key={vote.ballotId} style={{ background: "rgba(255,255,255,0.03)" }}>
-                        <td style={{ padding: "1rem", borderRadius: "8px 0 0 8px", color: "#cbd5e1" }}>
-                          {vote.castAt ? new Date(vote.castAt).toLocaleTimeString() : "N/A"}
-                        </td>
-                        <td style={{ padding: "1rem", fontFamily: "monospace", color: "#94a3b8" }}>
-                          {vote.ballotId.substring(0, 12)}...
-                        </td>
-                        <td style={{ padding: "1rem", fontFamily: "monospace", color: "#64748b", fontSize: "0.85rem" }}>
-                          {vote.keyImage ? vote.keyImage.substring(0, 16) + "..." : "---"}
-                        </td>
-                        <td style={{ padding: "1rem", borderRadius: "0 8px 8px 0" }}>
-                          <span style={{
-                            display: "inline-block",
-                            padding: "4px 12px",
-                            borderRadius: "99px",
-                            fontSize: "0.75rem",
-                            fontWeight: 600,
-                            color: badgeColor,
-                            backgroundColor: badgeBg,
-                            border: `1px solid ${badgeColor}30`
-                          }}>
-                            {label}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {votes.length === 0 && (
-                    <tr>
-                      <td colSpan={3} style={{ padding: "2rem", textAlign: "center", color: "#64748b" }}>
-                        Waiting for votes...
-                      </td>
+                  {ballots.slice(0, 10).map((b) => (
+                    <tr key={b.ballotId} style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
+                      <td style={td}>{new Date(b.castAt).toLocaleString()}</td>
+                      <td style={{ ...td, fontFamily: "monospace" }}>{b.ballotId.slice(0, 18)}...</td>
+                      <td style={{ ...td, fontFamily: "monospace", color: "#64748b" }}>{b.keyImage.slice(0, 16)}...</td>
+                      <td style={td}>1 of {b.ringSize}</td>
                     </tr>
+                  ))}
+                  {ballots.length === 0 && (
+                    <tr><td colSpan={4} style={{ ...td, textAlign: "center", color: "#64748b" }}>Waiting for votes...</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
           </GlassCard>
 
-          {/* Ledger Timeline */}
+          {/* Roll */}
           <GlassCard>
-            <h3 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "1rem" }}>Tamper-Proof Ledger Timeline</h3>
-            <div style={{ position: "relative", paddingLeft: "1.5rem" }}>
-              <div style={{ position: "absolute", left: "0", top: "0", bottom: "0", width: "2px", background: "rgba(255,255,255,0.1)" }}></div>
-
-              {[
-                { id: 3, votes: 30, hash: "0xa7d9...e5c8", status: "Finalizing" },
-                { id: 2, votes: 32, hash: "0x81bc...d2f4", status: "Anchored" },
-                { id: 1, votes: 25, hash: "0x4f3a...9c1b", status: "Anchored" }
-              ].map((block, i) => (
-                <div key={block.id} style={{ marginBottom: "1.5rem", position: "relative" }}>
-                  <div style={{ position: "absolute", left: "-1.9rem", top: "0.25rem", width: "1rem", height: "1rem", borderRadius: "50%", background: i === 0 ? "var(--primary)" : "#64748b", border: "2px solid rgba(0,0,0,0.5)" }}></div>
-                  <div style={{ background: "rgba(255,255,255,0.03)", padding: "1rem", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.05)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                      <span style={{ fontWeight: 600, color: "white" }}>Block #{block.id}</span>
-                      <span style={{ fontSize: "0.8rem", color: i === 0 ? "var(--primary)" : "#94a3b8" }}>{block.status}</span>
-                    </div>
-                    <div style={{ fontSize: "0.9rem", color: "#94a3b8" }}>
-                      {block.votes} Encrypted Votes • Merkle Root: <span style={{ fontFamily: "monospace", color: "#cbd5e1" }}>{block.hash}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <h3 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "0.25rem" }}>Electoral roll</h3>
+            <p className="text-muted text-sm" style={{ marginBottom: "1rem" }}>
+              One vote per flat; the registered owner votes. Synthetic data. Members with dues pending or a disputed title are not eligible.
+            </p>
+            <div style={{ overflowX: "auto", maxHeight: "420px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem", color: cardText }}>
+                <thead>
+                  <tr style={{ textAlign: "left", ...muted }}>
+                    <th style={th}>Member</th><th style={th}>Flat</th><th style={th}>Name</th><th style={th}>Occupancy</th><th style={th}>Eligibility</th><th style={th}>Code</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {members.map((m) => (
+                    <tr key={m.membershipNo} style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
+                      <td style={td}>{m.membershipNo}</td>
+                      <td style={td}>{m.unitLabel}</td>
+                      <td style={td}>{m.fullName}{m.jointOwnerName ? ` & ${m.jointOwnerName}` : ""}</td>
+                      <td style={td}>{m.occupancy.replace("_", " ").toLowerCase()}</td>
+                      <td style={{ ...td, color: m.eligible ? "#4ade80" : "#fbbf24" }}>{m.eligible ? "Eligible" : m.ineligibleReason.replace("_", " ").toLowerCase()}</td>
+                      <td style={{ ...td, color: m.code === "REDEEMED" ? "#4ade80" : m.code === "ISSUED" ? "#a5b4fc" : "#64748b" }}>{m.code === "NONE" ? "-" : m.code.toLowerCase()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </GlassCard>
         </div>

@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React from "react";
 import { Link } from "react-router-dom";
 import { motion, useScroll, useTransform } from "framer-motion";
 import HeroScene from "../components/3d/HeroScene";
@@ -15,16 +15,6 @@ const Landing = () => {
   const heroTextY = useTransform(scrollY, [0, 500], [0, 300]);
   const heroSceneY = useTransform(scrollY, [0, 500], [0, -150]);
   const heroOpacity = useTransform(scrollY, [0, 300], [1, 0]);
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.3
-      }
-    }
-  };
 
   return (
     <ScrollLayout>
@@ -52,7 +42,7 @@ const Landing = () => {
                 background: theme === "light" ? "linear-gradient(135deg, #0891b2 0%, #059669 100%)" : "none",
                 WebkitBackgroundClip: theme === "light" ? "text" : "unset",
                 WebkitTextFillColor: theme === "light" ? "transparent" : "unset"
-              }}>Core principle: ONE PERSON, ONE VOTE.</strong>
+              }}>Core principle: ONE ELIGIBLE VOTER, ONE VOTE.</strong>
             </p>
             <div style={{ display: "flex", gap: "1rem" }}>
               <Link to="/kiosk">
@@ -126,19 +116,19 @@ const Landing = () => {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "2rem", marginBottom: "6rem", perspective: "1000px" }}>
             <TiltCard delay={0}>
               <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>🔒</div>
-              <h3>End-to-End Encryption</h3>
+              <h3>Encrypted Ballots</h3>
               <p className="text-muted" style={{ marginTop: "0.5rem" }}>
-                Votes are encrypted on your device using RSA-OAEP before they ever touch the network.
-                The server never sees your choice.
+                Your choice is encrypted on your device (RSA-OAEP) with the election's public key before it
+                touches the network. The server stores only ciphertext and decrypts ballots in aggregate to count them.
               </p>
             </TiltCard>
 
             <TiltCard delay={0.1}>
               <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>🙈</div>
-              <h3>Server-Blind Voting</h3>
+              <h3>Anonymous Ring Signatures</h3>
               <p className="text-muted" style={{ marginTop: "0.5rem" }}>
-                Backend infrastructure only handles ciphertext and metadata.
-                Even if compromised, administrators cannot read individual votes.
+                Each ballot is signed on behalf of the whole ring of registered voters. It proves a registered
+                voter cast it without revealing which one, and no voter identity is stored with a ballot.
               </p>
             </TiltCard>
 
@@ -153,19 +143,19 @@ const Landing = () => {
 
             <TiltCard delay={0.3}>
               <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>✍️</div>
-              <h3>Digital Signatures</h3>
+              <h3>Double-Vote Protection</h3>
               <p className="text-muted" style={{ marginTop: "0.5rem" }}>
-                Every vote is mathematically signed (ECDSA) by the voter's secure identity,
-                preventing tampering and impersonation.
+                Each voter registers one secret key using a personal single-use voting code. A link tag derived
+                from that key lets the system reject a second ballot without learning who cast either.
               </p>
             </TiltCard>
 
             <TiltCard delay={0.4}>
               <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>🛡️</div>
-              <h3>Tamper-Proof Ledger</h3>
+              <h3>Public Audit Ledger</h3>
               <p className="text-muted" style={{ marginTop: "0.5rem" }}>
-                Encrypted votes are anchored to an immutable ledger.
-                You can verify your vote was counted without revealing how you voted.
+                Every ballot's proof is published. Anyone can check that yours was recorded and that its
+                signature is valid, without learning how you voted.
               </p>
             </TiltCard>
           </div>

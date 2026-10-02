@@ -54,7 +54,7 @@ export const AuthProvider = ({ children }) => {
 
             setAdmin(data.admin);
             return { success: true };
-        } catch (err) {
+        } catch {
             const errorMsg = "Network error. Please check if server is running.";
             setError(errorMsg);
             return { success: false, error: errorMsg };
@@ -79,7 +79,7 @@ export const AuthProvider = ({ children }) => {
             }
 
             return { success: true, message: data.message };
-        } catch (err) {
+        } catch {
             const errorMsg = "Network error. Please try again.";
             setError(errorMsg);
             return { success: false, error: errorMsg };
@@ -129,6 +129,9 @@ export const AuthProvider = ({ children }) => {
         return () => clearInterval(interval);
     }, [admin, refreshToken]);
 
+    // Stable identity, so effects that depend on it do not re-run every render.
+    const clearError = useCallback(() => setError(null), []);
+
     const value = {
         admin,
         loading,
@@ -138,7 +141,7 @@ export const AuthProvider = ({ children }) => {
         register,
         logout,
         checkAuth,
-        clearError: () => setError(null)
+        clearError
     };
 
     return (

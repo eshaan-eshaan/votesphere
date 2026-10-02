@@ -36,6 +36,9 @@ if (process.env.ELECTION_PRIVATE_KEY) {
 
 const getPublicKeyJwk = () => publicKey.export({ format: "jwk" });
 
+// A valid RSA-OAEP ciphertext is exactly one modulus long.
+const CIPHERTEXT_BYTES = privateKey.asymmetricKeyDetails.modulusLength / 8;
+
 const decryptChoice = (base64Ciphertext) => {
     const buffer = Buffer.from(base64Ciphertext, "base64");
     const plaintext = crypto.privateDecrypt(
@@ -49,4 +52,4 @@ const decryptChoice = (base64Ciphertext) => {
     return plaintext.toString("utf8");
 };
 
-module.exports = { getPublicKeyJwk, decryptChoice };
+module.exports = { getPublicKeyJwk, decryptChoice, CIPHERTEXT_BYTES };

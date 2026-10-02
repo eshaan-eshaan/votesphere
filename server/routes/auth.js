@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const prisma = require("../db");
 const { authenticate } = require("../middleware/auth");
-const { JWT_SECRET, ADMIN_SETUP_KEY } = require("../config");
+const { JWT_SECRET, ADMIN_SETUP_KEY, SUPERADMIN_EMAILS } = require("../config");
 
 const router = express.Router();
 // const prisma = new PrismaClient(); // Removed
@@ -13,6 +13,20 @@ const router = express.Router();
 const BCRYPT_ROUNDS = 12;
 const ACCESS_TOKEN_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || "15m";
 const REFRESH_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// One password policy for registration and password changes.
+const PASSWORD_RULE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+const passwordProblem = (password) => {
+    if (typeof password !== "string") return "Password is required.";
+    if (password.length < 8) return "Password must be at least 8 characters long.";
+    if (!PASSWORD_RULE.test(password)) return "Password must contain uppercase, lowercase, and numbers.";
+    return null;
+};
+
+// Constant-time comparison of two secrets (compares fixed-length digests).
+const sha256 = (value) => crypto.createHash("sha256").update(value).digest();
+const safeEqual = (given, expected) =>
+    typeof given === "string" && crypto.timingSafeEqual(sha256(given), sha256(expected));
 
 /**
  * Generate JWT tokens
@@ -46,7 +60,7 @@ const getCookieOptions = (maxAge) => ({
  */
 router.post("/register", async (req, res) => {
     try {
-        const { email, password, setupKey } = req.body;
+        const { email, password, setupKey } = req.body || {};
 
         // Validate input
         if (!email || !password) {
@@ -66,12 +80,9 @@ router.post("/register", async (req, res) => {
         }
 
         // Password strength check
-        if (password.length < 8) {
-            return res.status(400).json({ ok: false, error: "Password must be at least 8 characters long." });
-        }
-        const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
-        if (!passwordRegex.test(password)) {
-            return res.status(400).json({ ok: false, error: "Password must contain uppercase, lowercase, and numbers." });
+        const problem = passwordProblem(password);
+        if (problem) {
+            return res.status(400).json({ ok: false, error: problem });
         }
 
         // Admin registration requires the shared setup key for every signup,
@@ -82,7 +93,7 @@ router.post("/register", async (req, res) => {
                 error: "Admin registration is disabled (ADMIN_SETUP_KEY not configured)."
             });
         }
-        if (setupKey !== ADMIN_SETUP_KEY) {
+        if (!safeEqual(setupKey, ADMIN_SETUP_KEY)) {
             return res.status(403).json({
                 ok: false,
                 error: "Invalid setup key."
@@ -137,7 +148,7 @@ router.post("/register", async (req, res) => {
  */
 router.post("/login", async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password } = req.body || {};
 
         // Validate input
         if (!email || !password) {
@@ -193,7 +204,7 @@ router.post("/login", async (req, res) => {
             message: "Login successful.",
             admin: {
                 email: admin.email,
-                role: admin.role
+                role: SUPERADMIN_EMAILS.has(admin.email) ? "superadmin" : admin.role
             },
             accessToken // Also return in body for clients that can't use cookies
         });
@@ -249,7 +260,7 @@ router.post("/logout", async (req, res) => {
  */
 router.post("/refresh", async (req, res) => {
     try {
-        const refreshToken = req.cookies?.refreshToken || req.body.refreshToken;
+        const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
 
         if (!refreshToken) {
             return res.status(401).json({
@@ -337,7 +348,7 @@ router.get("/me", authenticate, async (req, res) => {
  */
 router.post("/change-password", authenticate, async (req, res) => {
     try {
-        const { currentPassword, newPassword } = req.body;
+        const { currentPassword, newPassword } = req.body || {};
 
         if (!currentPassword || !newPassword) {
             return res.status(400).json({
@@ -346,11 +357,9 @@ router.post("/change-password", authenticate, async (req, res) => {
             });
         }
 
-        if (newPassword.length < 8) {
-            return res.status(400).json({
-                ok: false,
-                error: "New password must be at least 8 characters long."
-            });
+        const problem = passwordProblem(newPassword);
+        if (problem) {
+            return res.status(400).json({ ok: false, error: problem });
         }
 
         // Get admin with password hash

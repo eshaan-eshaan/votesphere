@@ -1,8 +1,10 @@
 const jwt = require("jsonwebtoken");
 const prisma = require("../db");
-const { JWT_SECRET } = require("../config");
+const { JWT_SECRET, SUPERADMIN_EMAILS } = require("../config");
 
-// const prisma = new PrismaClient(); // Removed
+// Admins whose email is listed in SUPERADMIN_EMAILS get the superadmin role.
+const withRole = (admin) =>
+    SUPERADMIN_EMAILS.has(admin.email) ? { ...admin, role: "superadmin" } : admin;
 
 /**
  * JWT Authentication Middleware
@@ -40,7 +42,7 @@ const authenticate = async (req, res, next) => {
         }
 
         // Attach admin to request
-        req.admin = admin;
+        req.admin = withRole(admin);
         next();
     } catch (error) {
         if (error.name === "TokenExpiredError") {
@@ -110,10 +112,10 @@ const optionalAuth = async (req, res, next) => {
                 select: { id: true, email: true, role: true }
             });
             if (admin) {
-                req.admin = admin;
+                req.admin = withRole(admin);
             }
         }
-    } catch (error) {
+    } catch {
         // Ignore errors - this is optional auth
     }
     next();

@@ -12,10 +12,10 @@ const BlockchainNetwork = ({ mousePosition, isLightMode }) => {
 
     const blockData = useMemo(() => {
         const blocks = [
-            { label: "Identity", desc: "Voter Check", color: isLightMode ? "#4f46e5" : "#3b82f6" },
-            { label: "Encrypt", desc: "RSA-2048", color: "#6366f1" },
-            { label: "Vote", desc: "Sealed", color: "#22c55e" },
-            { label: "Ledger", desc: "Hash Chain", color: "#6366f1" },
+            { label: "Code", desc: "Voting Code", color: isLightMode ? "#4f46e5" : "#3b82f6" },
+            { label: "Encrypt", desc: "RSA-4096", color: "#6366f1" },
+            { label: "Sign", desc: "Ring Signature", color: "#22c55e" },
+            { label: "Ledger", desc: "Public Proofs", color: "#6366f1" },
             { label: "Audit", desc: "Verify", color: isLightMode ? "#4f46e5" : "#3b82f6" },
         ];
 

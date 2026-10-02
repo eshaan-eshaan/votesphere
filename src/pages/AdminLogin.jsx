@@ -29,12 +29,15 @@ const AdminLogin = () => {
     }
   }, [isAuthenticated, navigate]);
 
-  // Clear errors when switching modes
-  useEffect(() => {
+  // Clear messages when switching modes. (Done here rather than in an effect:
+  // an effect re-running on every render was wiping success and error messages
+  // as soon as they appeared.)
+  const switchMode = () => {
     setLocalError("");
     setSuccessMsg("");
     clearError();
-  }, [mode, clearError]);
+    setMode((m) => (m === "login" ? "register" : "login"));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -71,19 +74,16 @@ const AdminLogin = () => {
 
     if (mode === "login") {
       const result = await login(email, password);
-      console.log("Login result:", result);
       if (result.success) {
-        console.log("Login success, navigating to /admin");
         navigate("/admin");
       } else {
-        console.log("Login failed:", result.error);
         setLocalError(result.error);
       }
     } else {
       const result = await register(email, password, setupKey);
       if (result.success) {
-        setSuccessMsg("Account created! You can now login.");
         setMode("login");
+        setSuccessMsg("Account created! You can now login.");
         setPassword("");
         setConfirmPassword("");
         setSetupKey("");
@@ -298,7 +298,7 @@ const AdminLogin = () => {
                 borderTop: isLight ? "1px solid rgba(99, 102, 241, 0.15)" : "1px solid rgba(255,255,255,0.08)"
               }}>
                 <button
-                  onClick={() => setMode(mode === "login" ? "register" : "login")}
+                  onClick={switchMode}
                   style={{
                     background: "none",
                     border: "none",

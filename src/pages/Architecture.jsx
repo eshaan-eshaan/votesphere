@@ -41,9 +41,9 @@ const Architecture = () => {
             System Architecture & Security Model
           </h2>
           <p className="text-muted" style={{ maxWidth: "800px", margin: "0 auto", lineHeight: "1.8" }}>
-            Technical deep‑dive into how VoteSphere delivers secure, efficient,
-            and transparent digital elections while enforcing ONE PERSON, ONE
-            VOTE through strong identity, cryptography, and governance.
+            How VoteSphere works today: single-use voting codes, a frozen ring of registered
+            voters, anonymous ring-signed ballots, and a public audit ledger. The limits of this
+            demo are listed honestly at the bottom of the page.
           </p>
         </motion.div>
 
@@ -90,40 +90,40 @@ const Architecture = () => {
             }}
           >
             <div style={{ display: "grid", gap: "0.75rem" }}>
-              <div style={{ color: accentGreen, fontWeight: 700, fontSize: "1rem" }}>┌─ Voter (Client Device)</div>
+              <div style={{ color: accentGreen, fontWeight: 700, fontSize: "1rem" }}>┌─ Voter (browser)</div>
               <div style={{ paddingLeft: "1.5rem", borderLeft: `2px solid ${flowBorder}`, marginLeft: "0.5rem" }}>
-                <div style={{ color: accentBlue, marginBottom: "0.25rem" }}>▼ 1. Identity Verification</div>
+                <div style={{ color: accentBlue, marginBottom: "0.25rem" }}>▼ 1. Register a ring key</div>
                 <div style={{ fontSize: "0.8rem", color: flowMuted, marginBottom: "1rem", paddingLeft: "1rem" }}>
-                  Smart Card / Biometric / Aadhaar eKYC
+                  A single-use voting code from the Returning Officer proves eligibility; the browser creates the secret key and keeps it
                 </div>
 
-                <div style={{ color: accentGreen, marginBottom: "0.25rem" }}>▼ 2. Secure Kiosk UI (Offline-First)</div>
+                <div style={{ color: accentGreen, marginBottom: "0.25rem" }}>▼ 2. Encrypt the choice</div>
                 <div style={{ fontSize: "0.8rem", color: flowMuted, marginBottom: "1rem", paddingLeft: "1rem" }}>
-                  Air-gapped capable, tamper-evident interface
+                  RSA-OAEP-4096 with the election public key (Web Crypto)
                 </div>
 
-                <div style={{ color: accentBlue, marginBottom: "0.25rem" }}>▼ 3. Client-Side Encryption</div>
-                <div style={{ fontSize: "0.8rem", color: flowMuted, marginBottom: "1rem", paddingLeft: "1rem" }}>
-                  RSA-4096 / ECDSA (fully auditable source code)
-                </div>
-
-                <div style={{ color: accentGreen, marginBottom: "0.25rem" }}>▼ 4. Encrypted Vote + Receipt Hash</div>
+                <div style={{ color: accentBlue, marginBottom: "0.25rem" }}>▼ 3. Ring-sign the ciphertext</div>
                 <div style={{ fontSize: "0.8rem", color: flowMuted, paddingLeft: "1rem" }}>
-                  Zero-knowledge proof generation for anonymity
+                  Linkable ring signature over the frozen ring of all registered voters
                 </div>
               </div>
 
-              <div style={{ color: accentPurple, fontWeight: 700, marginTop: "1rem", fontSize: "1rem" }}>├─ Backend API (Server-Blind)</div>
+              <div style={{ color: accentPurple, fontWeight: 700, marginTop: "1rem", fontSize: "1rem" }}>├─ Server (Node + Express)</div>
               <div style={{ paddingLeft: "1.5rem", borderLeft: `2px solid ${flowBorder}`, marginLeft: "0.5rem" }}>
-                <div style={{ color: accentGreen, marginBottom: "0.25rem" }}>├─ Tamper-Proof Ledger / Blockchain</div>
+                <div style={{ color: accentGreen, marginBottom: "0.25rem" }}>├─ Verify, de-duplicate, store</div>
                 <div style={{ fontSize: "0.8rem", color: flowMuted, paddingLeft: "1rem" }}>
-                  Immutable, append-only cryptographic log
+                  Checks the signature against its own frozen ring, rejects a repeated link tag, stores ciphertext with no voter identity
                 </div>
               </div>
 
-              <div style={{ color: accentBlue, fontWeight: 700, marginTop: "1rem", fontSize: "1rem" }}>└─ Threshold Decryption Ceremony</div>
+              <div style={{ color: accentBlue, fontWeight: 700, marginTop: "1rem", fontSize: "1rem" }}>├─ Public audit ledger</div>
               <div style={{ fontSize: "0.8rem", color: flowMuted, paddingLeft: "2rem" }}>
-                2-of-3 Key Holders required (Privacy Preserved)
+                Every ballot&apos;s proof is published; anyone can re-verify its signature
+              </div>
+
+              <div style={{ color: accentGreen, fontWeight: 700, marginTop: "1rem", fontSize: "1rem" }}>└─ Tally</div>
+              <div style={{ fontSize: "0.8rem", color: flowMuted, paddingLeft: "2rem" }}>
+                The server decrypts ballots in aggregate with the election private key; admins see only totals
               </div>
             </div>
           </div>
@@ -132,16 +132,17 @@ const Architecture = () => {
         {/* Governance Roles Grid */}
         <div style={{ marginBottom: "4rem" }}>
           <h3 style={{ fontSize: "1.75rem", fontWeight: 600, marginBottom: "2rem", textAlign: "center", color: headingColor }}>
-            👥 Role‑Separated Governance
+            👥 Who Does What
           </h3>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "2rem" }}>
             <TiltCard delay={0.1}>
               <div style={{ padding: "1rem" }}>
                 <div style={{ fontSize: "1.2rem", fontWeight: 600, color: subHeadingColor, marginBottom: "0.75rem" }}>
-                  🗳️ Election Creator
+                  🗳️ Returning Officer (admin)
                 </div>
                 <p className="text-muted" style={{ fontSize: "0.95rem", lineHeight: "1.6" }}>
-                  Creates election, sets candidates, configures rules. Cannot access votes or decryption keys.
+                  Issues each eligible member a single-use voting code, opens key registration, freezes the ring and
+                  closes the poll. Sees totals only; holds no voter keys, so cannot vote for anyone.
                 </p>
               </div>
             </TiltCard>
@@ -149,10 +150,11 @@ const Architecture = () => {
             <TiltCard delay={0.2}>
               <div style={{ padding: "1rem" }}>
                 <div style={{ fontSize: "1.2rem", fontWeight: 600, color: subHeadingColor, marginBottom: "0.75rem" }}>
-                  🔑 Authentication Authority
+                  🔑 Voter
                 </div>
                 <p className="text-muted" style={{ fontSize: "0.95rem", lineHeight: "1.6" }}>
-                  Verifies voter eligibility and prevents duplicate ballots. Cannot see vote content.
+                  One flat, one vote. Redeems the code once to register a secret key that never leaves the browser,
+                  then casts one encrypted, ring-signed ballot.
                 </p>
               </div>
             </TiltCard>
@@ -160,10 +162,11 @@ const Architecture = () => {
             <TiltCard delay={0.3}>
               <div style={{ padding: "1rem" }}>
                 <div style={{ fontSize: "1.2rem", fontWeight: 600, color: subHeadingColor, marginBottom: "0.75rem" }}>
-                  📜 Ledger Manager
+                  🖥️ Server
                 </div>
                 <p className="text-muted" style={{ fontSize: "0.95rem", lineHeight: "1.6" }}>
-                  Anchors encrypted votes to blockchain. Cannot decrypt or modify any votes.
+                  Verifies signatures against its frozen ring, rejects repeat link tags, stores ciphertext with no identity,
+                  and holds the election decryption key to tally. It must be trusted to count honestly.
                 </p>
               </div>
             </TiltCard>
@@ -171,10 +174,11 @@ const Architecture = () => {
             <TiltCard delay={0.4}>
               <div style={{ padding: "1rem" }}>
                 <div style={{ fontSize: "1.2rem", fontWeight: 600, color: subHeadingColor, marginBottom: "0.75rem" }}>
-                  🧮 Counting Authority
+                  🔍 Public auditor
                 </div>
                 <p className="text-muted" style={{ fontSize: "0.95rem", lineHeight: "1.6" }}>
-                  Holds one key share. Participates in threshold decryption only during tallying.
+                  Anyone can read the ledger, fetch a ballot&apos;s proof and re-verify its ring signature against the
+                  published ring, without learning how anyone voted.
                 </p>
               </div>
             </TiltCard>
@@ -183,19 +187,20 @@ const Architecture = () => {
 
         {/* Bottom Grid */}
         <div style={{ display: "grid", gap: "2rem", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-          {/* Threshold Cryptography */}
+          {/* Trust model */}
           <GlassCard style={{ padding: "2rem" }}>
             <h3 style={{ fontSize: "1.5rem", fontWeight: 600, marginBottom: "1.25rem", color: headingColor }}>
-              🔐 Threshold Cryptography
+              ⚖️ Trust Model &amp; Limits
             </h3>
             <p className="text-muted" style={{ marginBottom: "1.5rem", lineHeight: "1.7" }}>
-              The private decryption key is split using Shamir&apos;s Secret
-              Sharing. No single party can decrypt alone.
+              This is a demonstration, not a certified election system.
             </p>
             <ul style={{ fontSize: "0.95rem", color: flowMuted, lineHeight: "2", listStyle: "disc", paddingLeft: "1.25rem" }}>
-              <li><strong style={{ color: strongText }}>Key Split:</strong> 3 trusted authorities (EC, University, Observer)</li>
-              <li><strong style={{ color: strongText }}>Threshold:</strong> Any 2 of 3 must collaborate to decrypt.</li>
-              <li><strong style={{ color: strongText }}>No Single Point of Failure:</strong> Prevents rogue admin attacks.</li>
+              <li><strong style={{ color: strongText }}>Not end-to-end:</strong> the server holds the election key and decrypts ballots to count them.</li>
+              <li><strong style={{ color: strongText }}>Anonymity comes from the ring signature:</strong> a ballot carries no voter identity.</li>
+              <li><strong style={{ color: strongText }}>Codes:</strong> whoever controls a voter&apos;s code can register their key.</li>
+              <li><strong style={{ color: strongText }}>Library:</strong> the ring-signature package is early-stage, unaudited, and uses a small (768-bit) group.</li>
+              <li><strong style={{ color: strongText }}>Data:</strong> the electorate is synthetic, and storage resets on free hosting.</li>
             </ul>
           </GlassCard>
 
@@ -210,6 +215,7 @@ const Architecture = () => {
               <li><strong style={{ color: strongText }}>3D Graphics:</strong> React Three Fiber + Three.js</li>
               <li><strong style={{ color: strongText }}>Backend:</strong> Node.js + Express + Prisma (SQLite)</li>
               <li><strong style={{ color: strongText }}>Auth:</strong> JWT + HTTP-Only Cookies</li>
+              <li><strong style={{ color: strongText }}>Codes:</strong> random 100-bit, stored only as HMACs</li>
             </ul>
           </GlassCard>
         </div>
