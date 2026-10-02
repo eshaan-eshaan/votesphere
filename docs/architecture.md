@@ -25,7 +25,7 @@ Browser (React + Vite)                         Server (Node 22 + Express 5 + Pri
 3. **Freeze.** The admin opens voting (at least 3 keys required). The registered keys become the **ring**, sorted canonically; its hash is stored. No more keys can join.
 4. **Voting.** The browser encrypts the candidate id with the election's RSA-OAEP-4096 public key, fetches the frozen ring, signs the ciphertext with a linkable ring signature, and posts `{electionId, encryptedBallot, signature, ringHash}`.
 5. **Server checks** (`server/routes/votes.js`): election is VOTING; ciphertext has the right length; signature is in canonical form and has one component per ring member plus two; it verifies against the **server's own** frozen ring; the ballot decrypts to a real candidate; the key image is unique (database constraint, so races return 409). The ballot is stored with no identity, a time rounded to 15 minutes, and a random id.
-6. **Close and tally.** `GET /api/stats` (admin) decrypts ballots in aggregate. `GET /api/votes` and `/api/votes/:ballotId` publish the ledger and per-ballot proofs for re-verification.
+6. **Close and tally.** `GET /api/stats` (admin) is sealed while voting is open (it returns only the ballot count and decrypts nothing, so a running tally cannot leak or sway voters). Once the election is `CLOSED` it decrypts ballots in aggregate. `GET /api/votes` and `/api/votes/:ballotId` publish the ledger and per-ballot proofs for re-verification.
 
 ## Why the server derives the ring
 

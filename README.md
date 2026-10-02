@@ -35,7 +35,7 @@ The core problem is getting **voter anonymity** and **no double voting** at the 
 ## How ballot secrecy actually works
 
 - **Anonymity** comes from the ring signature, not from encryption. A ballot carries no voter identity, and ballot times are rounded to 15 minutes so they cannot be matched to registration times.
-- **Choice secrecy** comes from a **server-held election keypair** (RSA-OAEP-4096). The browser encrypts the candidate id with the election's *public* key (`GET /api/election/public-key`). The server stores only ciphertext and decrypts it *in aggregate* to tally (`GET /api/stats`, admin only).
+- **Choice secrecy** comes from a **server-held election keypair** (RSA-OAEP-4096). The browser encrypts the candidate id with the election's *public* key (`GET /api/election/public-key`). The server stores only ciphertext and decrypts it *in aggregate* to tally (`GET /api/stats`, admin only). **The tally is sealed until the election is closed:** while voting is open the endpoint returns only the number of ballots and decrypts nothing.
 - **This is not end-to-end encryption.** The server holds the election private key, so it must be trusted to count honestly and not to look at individual ballots.
 - The election key is generated once and stored in the database, **encrypted** with a key derived from `JWT_SECRET`, so it survives restarts with no setup. If `JWT_SECRET` is ever changed while ballots exist, the server refuses to start rather than orphan them (restore the old secret, or set `ELECTION_PRIVATE_KEY`).
 
@@ -119,7 +119,7 @@ Then open `/admin-login`, create an admin with your `ADMIN_SETUP_KEY`, issue cod
 | `POST /api/votes` | ring member | Cast an encrypted, ring-signed ballot |
 | `GET /api/votes`, `/api/votes/:ballotId` | public | Ledger and per-ballot proof |
 | `POST /api/election/admin/issue-codes` · `/phase` · `/reset` | admin | Run the election (`reset`: superadmin) |
-| `GET /api/stats` | admin | Aggregate tally |
+| `GET /api/stats` | admin | Aggregate tally (sealed until the election is `CLOSED`) |
 
 ## Known limitations
 

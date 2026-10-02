@@ -152,7 +152,7 @@ async function encrypt(jwk, plaintext) {
     r = await api("GET", "/api/stats");
     check("stats need auth", r.status === 401);
     r = await api("GET", "/api/stats", undefined, token);
-    check("tally is right: c1=1 c2=1 c3=1 c4=1, 0 undecryptable", r.json.total === 4 && ["c1", "c2", "c3", "c4"].every((c) => r.json.byChoice[c] === 1) && r.json.undecryptable === 0, JSON.stringify(r.json.byChoice));
+    check("tally is sealed while voting is open (count only, no per-candidate data)", r.json.sealed === true && r.json.total === 4 && !("byChoice" in r.json), JSON.stringify(r.json));
 
     r = await api("POST", "/api/election/admin/reset", { confirm: "RESET" }, token);
     check("reset needs superadmin", r.status === 403);
@@ -164,6 +164,8 @@ async function encrypt(jwk, plaintext) {
     check("close election", r.status === 200);
     r = await vote(ids[4], "c1");
     check("voting refused after close", r.status === 409, r.json.error);
+    r = await api("GET", "/api/stats", undefined, token);
+    check("tally is revealed after close: c1=1 c2=1 c3=1 c4=1, 0 undecryptable", r.json.sealed !== true && r.json.total === 4 && ["c1", "c2", "c3", "c4"].every((c) => r.json.byChoice[c] === 1) && r.json.undecryptable === 0, JSON.stringify(r.json));
 
     // Rate limiter: /me must never lock anyone out; only failed logins count.
     let blocked = 0;

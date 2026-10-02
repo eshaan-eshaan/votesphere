@@ -722,7 +722,7 @@ Traditional voting faces a dilemma:
 | `GET` | `/api/election/public-key` | Election's public key, for client-side ballot encryption | No |
 | `GET` | `/api/votes` | Get all votes (choice never included, even authenticated) | No |
 | `POST` | `/api/votes` | Cast a vote | No |
-| `GET` | `/api/stats` | Decrypted per-candidate tallies | Yes |
+| `GET` | `/api/stats` | Decrypted per-candidate tallies (sealed until the election is closed) | Yes |
 
 ### 10.2 Environment Variables
 

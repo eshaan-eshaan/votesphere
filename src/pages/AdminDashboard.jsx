@@ -337,10 +337,19 @@ const AdminDashboard = () => {
               <h3 style={{ fontSize: "1.25rem", fontWeight: 600 }}>Results by candidate</h3>
               <p className="text-muted text-sm">
                 Ballots are decrypted on the server, in aggregate, to tally them. No individual choice is ever shown.
+                The tally stays sealed until voting is closed.
               </p>
             </div>
             {!results && <div className="text-muted text-sm">Loading results...</div>}
-            {results && election && (
+            {results?.sealed && (
+              <div style={{ padding: "1rem 1.25rem", borderRadius: "10px", background: "rgba(148,163,184,0.08)", border: "1px solid rgba(148,163,184,0.2)" }}>
+                <div style={{ fontWeight: 600, marginBottom: "0.25rem" }}>🔒 Results are sealed</div>
+                <div className="text-muted text-sm">
+                  {results.total} ballot{results.total === 1 ? "" : "s"} cast so far. Per-candidate counts are revealed only after you close voting.
+                </div>
+              </div>
+            )}
+            {results && !results.sealed && election && (
               <div style={{ display: "grid", gap: "0.75rem" }}>
                 {election.candidates.map((c) => {
                   const count = results.byChoice?.[c.id] || 0;

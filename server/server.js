@@ -8,6 +8,7 @@ const cookieParser = require("cookie-parser");
 const prisma = require("./db");
 const { initElectionKeys, decryptChoice } = require("./election-keys");
 const electionConfig = require("./election-config");
+const { getElection } = require("./election-service");
 const { seedRegistry } = require("./seed/load-registry");
 
 // Import routes
@@ -87,8 +88,16 @@ app.use("/api/votes", voteRoutes);
 
 // Aggregate results (authenticated only). Ballots are decrypted on the server,
 // in aggregate, purely to tally them; no per-ballot choice is ever returned.
+// The tally is sealed until the election is CLOSED: before that the server does
+// not decrypt anything, so a running count cannot leak or sway voters.
 app.get("/api/stats", authenticate, async (req, res) => {
   try {
+    const election = await getElection();
+    if (!election || election.status !== "CLOSED") {
+      const total = await prisma.vote.count({ where: { electionId: electionConfig.ELECTION_ID } });
+      return res.json({ sealed: true, status: election ? election.status : null, total });
+    }
+
     const votes = await prisma.vote.findMany({
       where: { electionId: electionConfig.ELECTION_ID },
       select: { encryptedBallot: true }
