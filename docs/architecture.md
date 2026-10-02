@@ -4,7 +4,7 @@ How the system works today. Design reasoning and measured library behaviour are 
 
 ## Overview
 
-A single Render web service: an Express API that also serves the built React app. Data lives in PostgreSQL (free Neon tier in production) through Prisma, applied with committed migrations. The electorate is a synthetic 50-flat housing society seeded at boot from `server/seed/voters.synthetic.json`.
+A single Render web service: an Express API that also serves the built React app. Data lives in PostgreSQL (free Render Postgres in production, which expires after 30 days; any Postgres works) through Prisma, applied with committed migrations. The electorate is a synthetic 50-flat housing society seeded at boot from `server/seed/voters.synthetic.json`.
 
 ```
 Browser (React + Vite)                         Server (Node 22 + Express 5 + Prisma 5)
