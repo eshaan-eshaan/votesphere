@@ -1,0 +1,12 @@
+**/node_modules
+dist
+.git
+.claude
+docs
+*.md
+.env
+server/.env
+# old SQLite files are no longer used
+server/prisma/dev.db
+server/dev.db
+server/data

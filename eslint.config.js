@@ -40,6 +40,11 @@ export default defineConfig([
     },
   },
   {
+    // Node helper scripts written as ES modules.
+    files: ['scripts/**/*.js'],
+    languageOptions: { ecmaVersion: 2022, globals: { ...globals.node }, sourceType: 'module' },
+  },
+  {
     // ES-module config files keep module syntax.
     files: ['eslint.config.js', 'vite.config.js'],
     languageOptions: { sourceType: 'module' },

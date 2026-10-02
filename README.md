@@ -62,9 +62,21 @@ Browser (React + Vite)                      Server (Node + Express + Prisma)
 | **Crypto** | Linkable Ring Signatures (`lrs`), RSA-OAEP-4096 (Web Crypto / Node crypto), bcrypt, JWT |
 | **Deployment** | Render.com |
 
-## Run it locally
+## Quick start with Docker (recommended)
 
-You need a PostgreSQL database. The quickest is Docker:
+One command runs the app and its PostgreSQL database on your machine, with no accounts and nothing else to install:
+
+```bash
+npm run docker:up        # creates .env with random secrets, builds, and starts everything
+```
+
+Then open **http://localhost:5000**, go to `/admin-login`, choose *Create Account*, and use the setup key the command printed (it is also in `.env`). Data lives in a Docker volume, so it survives `docker compose down` and restarts; `docker compose down -v` wipes it. To allow the *Reset election* button, put your admin email in `SUPERADMIN_EMAILS` in `.env` and run `docker compose up -d`.
+
+This setup is for local use and demos (the database password is a throwaway and the database port is bound to `127.0.0.1`). For a public link, deploy to Render with a hosted database (below).
+
+## Run it locally without Docker for the app
+
+You still need a PostgreSQL database. Docker is the quickest way to get one:
 
 ```bash
 docker run -d --name votesphere-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=votesphere -p 5433:5432 postgres:16-alpine

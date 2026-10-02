@@ -1,0 +1,45 @@
+# Run the whole app locally: PostgreSQL + the API serving the built frontend.
+#
+#   npm run docker:up        (creates a local .env with random secrets, then builds and starts)
+#   open http://localhost:5000
+#
+# Data lives in the `pgdata` volume, so it survives `docker compose down` and
+# restarts. `docker compose down -v` wipes it. This is for LOCAL use: the
+# database password below is a throwaway and the database port is only bound
+# to 127.0.0.1.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: votesphere
+      POSTGRES_PASSWORD: votesphere
+      POSTGRES_DB: votesphere
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U votesphere -d votesphere"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://votesphere:votesphere@db:5432/votesphere
+      JWT_SECRET: ${JWT_SECRET:?run "npm run docker:env" first to create .env}
+      ADMIN_SETUP_KEY: ${ADMIN_SETUP_KEY:?run "npm run docker:env" first to create .env}
+      SUPERADMIN_EMAILS: ${SUPERADMIN_EMAILS:-}
+
+volumes:
+  pgdata:
