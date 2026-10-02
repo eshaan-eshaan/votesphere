@@ -96,17 +96,35 @@ const AdminDashboard = () => {
     }
   };
 
-  const issueCodes = () =>
+  // Issues codes for members without one; `reissue` (membership numbers) also
+  // replaces those members' unredeemed codes, so a lost sheet is recoverable.
+  const issueCodes = (reissue = []) =>
     run("issue", async () => {
-      const data = await api("/api/election/admin/issue-codes", { method: "POST", body: "{}" });
-      if (data.issued.length > 0) setSheet(data.issued);
+      const data = await api("/api/election/admin/issue-codes", { method: "POST", body: JSON.stringify({ reissue }) });
+      if (data.issued.length > 0) {
+        const fresh = new Set(data.issued.map((s) => s.membershipNo));
+        setSheet((prev) =>
+          [...(prev || []).filter((s) => !fresh.has(s.membershipNo)), ...data.issued]
+            .sort((a, b) => a.membershipNo.localeCompare(b.membershipNo))
+        );
+      }
       setMessage({
         kind: "ok",
         text: data.issued.length > 0
-          ? `${data.issued.length} voting codes issued. They are shown below ONCE - download the sheet now.`
+          ? `${data.issued.length} voting code(s) ${reissue.length > 0 ? "re-issued (the old ones no longer work)" : "issued"}. They are shown below ONCE - download the sheet now.`
           : "Every eligible member already has a code.",
       });
     });
+
+  const reissueCodes = (membershipNos, what) => {
+    if (!window.confirm(`Replace the unredeemed voting code for ${what}? The old code(s) stop working immediately.`)) return;
+    issueCodes(membershipNos);
+  };
+
+  const hideSheet = () => {
+    if (!window.confirm("Hide the sheet? Codes cannot be shown again (you can re-issue unredeemed ones from the roll). Download the CSV first if you have not.")) return;
+    setSheet(null);
+  };
 
   const changePhase = (to) =>
     run(to, async () => {
@@ -134,6 +152,8 @@ const AdminDashboard = () => {
   const turnout = counts && counts.eligible > 0 ? Math.round((counts.ballots / counts.eligible) * 100) : 0;
   const phaseIndex = PHASES.findIndex((p) => p.id === status);
   const canFreeze = counts && election && counts.registered >= election.minRingSize;
+  const canReissue = status === "DRAFT" || status === "REGISTRATION";
+  const unredeemed = members.filter((m) => m.eligible && m.code === "ISSUED").map((m) => m.membershipNo);
   const cardText = isLight ? "#1e293b" : "white";
 
   return (
@@ -217,8 +237,17 @@ const AdminDashboard = () => {
             </div>
             <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
               {(status === "DRAFT" || status === "REGISTRATION") && (
-                <button className="btn btn-outline" onClick={issueCodes} disabled={!!busy}>
+                <button className="btn btn-outline" onClick={() => issueCodes()} disabled={!!busy}>
                   {busy === "issue" ? "Issuing..." : "Issue voting codes"}
+                </button>
+              )}
+              {(status === "DRAFT" || status === "REGISTRATION") && unredeemed.length > 0 && (
+                <button
+                  className="btn btn-outline"
+                  onClick={() => reissueCodes(unredeemed, `${unredeemed.length} member(s)`)}
+                  disabled={!!busy}
+                >
+                  Reissue {unredeemed.length} unredeemed code{unredeemed.length === 1 ? "" : "s"}
                 </button>
               )}
               {status === "DRAFT" && (
@@ -275,7 +304,7 @@ const AdminDashboard = () => {
                     sheet.map((s) => ({ membership_no: s.membershipNo, name: s.fullName, flat: s.unitLabel, aadhaar: s.aadhaarMasked, phone: s.phoneMasked, voting_code: s.code })),
                     "voting-code-sheet.csv"
                   )}>Download CSV</button>
-                  <button className="btn btn-outline" onClick={() => setSheet(null)}>Hide</button>
+                  <button className="btn btn-outline" onClick={hideSheet}>Hide</button>
                 </div>
               </div>
               <div style={{ overflowX: "auto", maxHeight: "320px" }}>
@@ -386,7 +415,19 @@ const AdminDashboard = () => {
                       <td style={td}>{m.fullName}{m.jointOwnerName ? ` & ${m.jointOwnerName}` : ""}</td>
                       <td style={td}>{m.occupancy.replace("_", " ").toLowerCase()}</td>
                       <td style={{ ...td, color: m.eligible ? "#4ade80" : "#fbbf24" }}>{m.eligible ? "Eligible" : m.ineligibleReason.replace("_", " ").toLowerCase()}</td>
-                      <td style={{ ...td, color: m.code === "REDEEMED" ? "#4ade80" : m.code === "ISSUED" ? "#a5b4fc" : "#64748b" }}>{m.code === "NONE" ? "-" : m.code.toLowerCase()}</td>
+                      <td style={{ ...td, color: m.code === "REDEEMED" ? "#4ade80" : m.code === "ISSUED" ? "#a5b4fc" : "#64748b" }}>
+                        {m.code === "NONE" ? "-" : m.code.toLowerCase()}
+                        {canReissue && m.eligible && m.code === "ISSUED" && (
+                          <button
+                            className="btn btn-outline"
+                            style={{ marginLeft: "0.75rem", padding: "0.15rem 0.6rem", fontSize: "0.75rem" }}
+                            onClick={() => reissueCodes([m.membershipNo], m.membershipNo)}
+                            disabled={!!busy}
+                          >
+                            Reissue
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
