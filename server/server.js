@@ -6,7 +6,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const cookieParser = require("cookie-parser");
 const prisma = require("./db");
-const { decryptChoice } = require("./election-keys");
+const { initElectionKeys, decryptChoice } = require("./election-keys");
 const electionConfig = require("./election-config");
 const { seedRegistry } = require("./seed/load-registry");
 
@@ -171,20 +171,35 @@ process.on("SIGTERM", async () => {
 
 // ---------- Start Server ----------
 
-app.listen(PORT, async () => {
-  console.log(`\nVoteSphere API running at http://localhost:${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
-  console.log(`CORS Origin: ${process.env.CORS_ORIGIN || "http://localhost:5173"}\n`);
-
-  try {
-    const adminCount = await prisma.admin.count();
-    console.log(`Database connected. Admin count: ${adminCount}`);
-    const { seeded } = await seedRegistry(prisma, electionConfig);
-    console.log(seeded > 0 ? `Seeded ${seeded} synthetic voters.` : "Voter roll already present.");
-  } catch (err) {
-    console.error("Database setup failed:", err);
+// Database setup runs BEFORE the server accepts traffic. A sleeping free-tier
+// database can take a few seconds to wake, so connection problems are retried.
+async function setUp() {
+  const attempts = 5;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const adminCount = await prisma.admin.count();
+      console.log(`Database connected. Admin count: ${adminCount}`);
+      const { seeded } = await seedRegistry(prisma, electionConfig);
+      console.log(seeded > 0 ? `Seeded ${seeded} synthetic voters.` : "Voter roll already present.");
+      await initElectionKeys(prisma, electionConfig.ELECTION_ID);
+      return;
+    } catch (err) {
+      if (err.fatal || attempt >= attempts) throw err;
+      console.warn(`Startup attempt ${attempt}/${attempts} failed (${err.message}); retrying in 3s...`);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
   }
+}
 
-  // Keep process alive
-  setInterval(() => { }, 10000);
-});
+setUp()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`\nVoteSphere API running at http://localhost:${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+      console.log(`CORS Origin: ${process.env.CORS_ORIGIN || "http://localhost:5173"}\n`);
+    });
+  })
+  .catch((err) => {
+    console.error("Startup failed:", err);
+    process.exit(1);
+  });

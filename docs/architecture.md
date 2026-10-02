@@ -4,7 +4,7 @@ How the system works today. Design reasoning and measured library behaviour are 
 
 ## Overview
 
-A single Render web service: an Express API that also serves the built React app. Data lives in SQLite through Prisma. The electorate is a synthetic 50-flat housing society seeded at boot from `server/seed/voters.synthetic.json`.
+A single Render web service: an Express API that also serves the built React app. Data lives in PostgreSQL (free Neon tier in production) through Prisma, applied with committed migrations. The electorate is a synthetic 50-flat housing society seeded at boot from `server/seed/voters.synthetic.json`.
 
 ```
 Browser (React + Vite)                         Server (Node 22 + Express 5 + Prisma 5)
@@ -12,8 +12,8 @@ Browser (React + Vite)                         Server (Node 22 + Express 5 + Pri
   /audit  public ledger + ballot check           /api/votes     verify + store, public ledger
   /admin  Returning Officer dashboard            /api/auth      admin login (JWT + HttpOnly cookies)
   lrs ring keys, ring signing                    /api/stats     aggregate tally (admin only)
-  Web Crypto RSA-OAEP encryption                 SQLite: Election, Member, Credential,
-                                                         RingMember, Vote, Admin, RefreshToken
+  Web Crypto RSA-OAEP encryption                 PostgreSQL: Election, ElectionKey, Member, Credential,
+                                                             RingMember, Vote, Admin, RefreshToken
 ```
 
 ## Election lifecycle
@@ -45,6 +45,6 @@ Measured on `lrs` 0.1.5: the key image changes with the ring's exact members and
 
 ## Known limits
 
-- SQLite on Render's free tier resets on restart; the roll re-seeds, everything else is lost. Without `ELECTION_PRIVATE_KEY` the election key also rotates, orphaning earlier ballots.
+- **Persistence.** Everything, including the election private key, lives in PostgreSQL. The key is stored encrypted (AES-256-GCM) under a key derived from `JWT_SECRET`; if `JWT_SECRET` changes while ballots exist, the server refuses to start rather than orphan them. `ELECTION_PRIVATE_KEY` can override the stored key. Free-tier hosts sleep when idle and the free database auto-suspends, so first requests can be slow; startup retries while the database wakes.
 - `lrs` is early-stage, unaudited, and uses a 768-bit group.
 - One post (President) and one election; the synthetic roll is fictional.

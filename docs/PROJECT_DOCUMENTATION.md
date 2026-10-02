@@ -1,6 +1,8 @@
 # 📦 VoteSphere - Complete Project Documentation
 
-> **A Secure End-to-End Encrypted Electronic Voting System with Linkable Ring Signatures**
+> **Status note (2026-10-02):** this document is the original project write-up and is only partly current. Where it disagrees with the code, trust [README.md](../README.md), [architecture.md](architecture.md) and [ADR-001](adr/ADR-001-voter-registry-and-synthetic-electorate.md). In particular: ballots are encrypted with RSA-OAEP-4096 under a server-held election key (not AES-256, and not end-to-end); there is no plaintext choice column; voters register ring keys with single-use voting codes; the ledger is a public ballot list, not a blockchain; and data is stored in PostgreSQL.
+
+> **An anonymous, double-vote-resistant online election system with Linkable Ring Signatures**
 
 ---
 
@@ -94,7 +96,7 @@ VoteSphere is a web-based voting system demonstrating cryptographic voting princ
 | Key Image | Unique identifier derived from signer's private key (detects double voting) |
 | Ring | Group of public keys used to anonymize the signer |
 | Ballot ID | Unique identifier for each vote cast |
-| E2EE | End-to-End Encryption |
+| E2EE | End-to-end encryption (not provided: the server holds the election key) |
 
 ### 3.2 Overall Description
 
@@ -521,7 +523,7 @@ VoteSphere is a standalone web application consisting of:
 |---------|-------------|------------|
 | **Linkable Ring Signatures** | Anonymous signing within a group | LRS library |
 | **Double Vote Prevention** | Unique key images detect duplicate votes | Key image uniqueness |
-| **End-to-End Encryption** | Ballot content encrypted | RSA-OAEP-4096 |
+| **Encrypted ballots** | Ballot choice encrypted with the election public key | RSA-OAEP-4096 |
 
 ### 7.2 User-Facing Features
 
@@ -554,7 +556,7 @@ VoteSphere is a standalone web application consisting of:
 
 ### 8.3 Detailed Description (Bullet Points)
 
-**VoteSphere - Secure E2E Encrypted Voting System**
+**VoteSphere - Anonymous RWA Election System**
 - Implemented **Linkable Ring Signatures** for anonymous voting while preventing double votes
 - Built responsive React frontend with **Three.js 3D visualizations** and **Framer Motion** animations
 - Developed RESTful API with **Node.js/Express** and **Prisma ORM** for SQLite/PostgreSQL
@@ -573,7 +575,7 @@ VoteSphere is a standalone web application consisting of:
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         🗳️  VOTESPHERE
-  Secure End-to-End Encrypted Voting
+  Anonymous, Double-Vote-Resistant Voting
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
            [Your Name]
         [Date] • [Course]

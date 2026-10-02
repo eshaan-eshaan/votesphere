@@ -34,4 +34,10 @@ const CODE_HMAC_KEY = crypto
     .update("votesphere/voting-code/v1")
     .digest();
 
-module.exports = { JWT_SECRET, ADMIN_SETUP_KEY, SUPERADMIN_EMAILS, CODE_HMAC_KEY };
+// Key that encrypts the election private key stored in the database.
+const ELECTION_KEY_WRAP_KEY = crypto
+    .createHmac("sha256", JWT_SECRET)
+    .update("votesphere/election-key-wrap/v1")
+    .digest();
+
+module.exports = { JWT_SECRET, ADMIN_SETUP_KEY, SUPERADMIN_EMAILS, CODE_HMAC_KEY, ELECTION_KEY_WRAP_KEY };

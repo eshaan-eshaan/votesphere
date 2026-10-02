@@ -6,8 +6,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // Admin users who can access the dashboard
@@ -21,6 +21,14 @@ model Admin {
 
   // Relation to refresh tokens
   refreshTokens RefreshToken[]
+}
+
+// The election decryption key, encrypted with a key derived from JWT_SECRET so it
+// survives restarts. (ELECTION_PRIVATE_KEY in the environment overrides this.)
+model ElectionKey {
+  electionId          String   @id
+  encryptedPrivateKey String
+  createdAt           DateTime @default(now())
 }
 
 // One election with a lifecycle: DRAFT -> REGISTRATION -> VOTING -> CLOSED.

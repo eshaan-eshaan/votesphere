@@ -4,52 +4,122 @@
 // election's PUBLIC key. The private key never leaves the server and is only
 // ever used to decrypt choices in aggregate, for tallying (see /api/stats).
 //
-// If ELECTION_PRIVATE_KEY isn't provided, a keypair is generated in memory at
-// boot. That's fine for now since vote data itself doesn't persist across
-// restarts either (no persistent disk configured yet) - but it does mean
-// ballots encrypted before a restart become undecryptable after one. Set
-// ELECTION_PRIVATE_KEY (PEM) for a stable key once persistence is added.
+// Where the private key lives, in order of precedence:
+//  1. ELECTION_PRIVATE_KEY (PEM) in the environment, if set;
+//  2. the database (ElectionKey table), encrypted with AES-256-GCM under a key
+//     derived from JWT_SECRET - generated once, on first start, then reused;
+// so it survives restarts with no manual setup. If the stored key can no
+// longer be decrypted (JWT_SECRET changed) and ballots exist, the server
+// refuses to start rather than silently replacing it, which would orphan them.
 
 const crypto = require("crypto");
+const { ELECTION_KEY_WRAP_KEY } = require("./config");
 
-let privateKey;
-let publicKey;
+let privateKey = null;
+let publicKey = null;
 
-if (process.env.ELECTION_PRIVATE_KEY) {
-    privateKey = crypto.createPrivateKey(process.env.ELECTION_PRIVATE_KEY);
+const wrap = (pem) => {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", ELECTION_KEY_WRAP_KEY, iv);
+    const encrypted = Buffer.concat([cipher.update(pem, "utf8"), cipher.final()]);
+    return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64");
+};
+
+const unwrap = (stored) => {
+    const buf = Buffer.from(stored, "base64");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", ELECTION_KEY_WRAP_KEY, buf.subarray(0, 12));
+    decipher.setAuthTag(buf.subarray(12, 28));
+    return Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString("utf8");
+};
+
+const generatePem = () =>
+    crypto
+        .generateKeyPairSync("rsa", { modulusLength: 4096, publicExponent: 0x10001 })
+        .privateKey.export({ type: "pkcs8", format: "pem" });
+
+const setKey = (pem) => {
+    privateKey = crypto.createPrivateKey(pem);
     publicKey = crypto.createPublicKey(privateKey);
-    console.log("🔑 Election keypair loaded from ELECTION_PRIVATE_KEY.");
-} else {
-    const generated = crypto.generateKeyPairSync("rsa", {
-        modulusLength: 4096,
-        publicExponent: 0x10001
-    });
-    privateKey = generated.privateKey;
-    publicKey = generated.publicKey;
-    console.warn(
-        "⚠️  ELECTION_PRIVATE_KEY not set - generated an ephemeral election " +
-        "keypair in memory. It will change on every restart, invalidating " +
-        "any ballots encrypted before that restart. Fine for a demo; set " +
-        "ELECTION_PRIVATE_KEY for a stable key in a persistent deployment."
-    );
+};
+
+// Must complete before the server starts accepting requests.
+async function initElectionKeys(prisma, electionId) {
+    if (process.env.ELECTION_PRIVATE_KEY) {
+        try {
+            // Accept PEMs pasted into a single-line variable with literal "\n".
+            setKey(process.env.ELECTION_PRIVATE_KEY.replace(/\\n/g, "\n"));
+        } catch {
+            throw new Error("ELECTION_PRIVATE_KEY is set but is not a valid PEM private key.");
+        }
+        console.log("Election keypair loaded from ELECTION_PRIVATE_KEY.");
+        return "environment";
+    }
+
+    const row = await prisma.electionKey.findUnique({ where: { electionId } });
+    if (row) {
+        try {
+            setKey(unwrap(row.encryptedPrivateKey));
+            console.log("Election keypair loaded from the database.");
+            return "database";
+        } catch {
+            const ballots = await prisma.vote.count({ where: { electionId } });
+            if (ballots > 0) {
+                throw Object.assign(
+                    new Error(
+                        `The stored election key cannot be decrypted (was JWT_SECRET changed?). ` +
+                        `Refusing to start: replacing it would orphan ${ballots} ballot(s). ` +
+                        `Restore the previous JWT_SECRET, or set ELECTION_PRIVATE_KEY.`
+                    ),
+                    { fatal: true } // a configuration error: retrying cannot help
+                );
+            }
+            console.warn("Stored election key was unreadable but no ballots exist; replacing it.");
+        }
+    }
+
+    const pem = generatePem();
+    try {
+        await prisma.electionKey.upsert({
+            where: { electionId },
+            update: { encryptedPrivateKey: wrap(pem) },
+            create: { electionId, encryptedPrivateKey: wrap(pem) },
+        });
+    } catch (e) {
+        // Another instance created it a moment ago: use theirs.
+        if (e && e.code === "P2002") return initElectionKeys(prisma, electionId);
+        throw e;
+    }
+    setKey(pem);
+    console.log("Generated a new election keypair and stored it (encrypted) in the database.");
+    return "generated";
 }
 
-const getPublicKeyJwk = () => publicKey.export({ format: "jwk" });
+const requireKey = () => {
+    if (!privateKey) throw new Error("Election keys are not initialised.");
+};
+
+const getPublicKeyJwk = () => {
+    requireKey();
+    return publicKey.export({ format: "jwk" });
+};
 
 // A valid RSA-OAEP ciphertext is exactly one modulus long.
-const CIPHERTEXT_BYTES = privateKey.asymmetricKeyDetails.modulusLength / 8;
+const ciphertextBytes = () => {
+    requireKey();
+    return privateKey.asymmetricKeyDetails.modulusLength / 8;
+};
 
 const decryptChoice = (base64Ciphertext) => {
-    const buffer = Buffer.from(base64Ciphertext, "base64");
+    requireKey();
     const plaintext = crypto.privateDecrypt(
         {
             key: privateKey,
             padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-            oaepHash: "sha256"
+            oaepHash: "sha256",
         },
-        buffer
+        Buffer.from(base64Ciphertext, "base64")
     );
     return plaintext.toString("utf8");
 };
 
-module.exports = { getPublicKeyJwk, decryptChoice, CIPHERTEXT_BYTES };
+module.exports = { initElectionKeys, getPublicKeyJwk, decryptChoice, ciphertextBytes };

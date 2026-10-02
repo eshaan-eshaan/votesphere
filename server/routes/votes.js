@@ -3,7 +3,7 @@ const crypto = require("crypto");
 const lrs = require("lrs");
 const prisma = require("../db");
 const { authenticate } = require("../middleware/auth");
-const { decryptChoice, CIPHERTEXT_BYTES } = require("../election-keys");
+const { decryptChoice, ciphertextBytes } = require("../election-keys");
 const { ELECTION_ID, TIME_BUCKET_MS } = require("../election-config");
 const { parseSignature, bucketDate } = require("../ring");
 const { getElection, candidateIds, getFrozenRing } = require("../election-service");
@@ -65,7 +65,7 @@ router.post("/", async (req, res) => {
             return fail(res, 400, "Malformed ballot.");
         }
         const cipher = Buffer.from(encryptedBallot, "base64");
-        if (cipher.length !== CIPHERTEXT_BYTES || cipher.toString("base64") !== encryptedBallot) {
+        if (cipher.length !== ciphertextBytes() || cipher.toString("base64") !== encryptedBallot) {
             return fail(res, 400, "Malformed ballot.");
         }
         const parts = parseSignature(signature);

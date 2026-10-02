@@ -3,15 +3,24 @@ services:
     name: secure-vote-demo
     env: node
     plan: free
-    buildCommand: npm install && npm install --prefix server && cd server && npx prisma generate && npx prisma db push --accept-data-loss && cd .. && npm run build
+    # migrate deploy applies only the committed migrations and never drops data
+    # (unlike `db push --accept-data-loss`), which matters now that the
+    # database persists.
+    buildCommand: npm install && npm install --prefix server && cd server && npx prisma generate && npx prisma migrate deploy && cd .. && npm run build
     startCommand: node server/server.js
     envVars:
       - key: NODE_ENV
         value: production
+      # A free Postgres connection string (Neon recommended). Set it once in the
+      # Render dashboard; it is not stored in this repo.
       - key: DATABASE_URL
-        value: file:./dev.db
+        sync: false
+      # Generated once by Render and kept across deploys. Changing JWT_SECRET
+      # invalidates admin logins and voting codes, and the server will refuse to
+      # start if ballots exist (the election key is encrypted under it).
       - key: JWT_SECRET
         generateValue: true
+      # Needed once to register the first admin. Find it in the Render dashboard
+      # under Environment, or replace it with any value you prefer.
       - key: ADMIN_SETUP_KEY
         generateValue: true
-

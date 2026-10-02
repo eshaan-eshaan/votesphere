@@ -174,7 +174,7 @@ The central trade is **realism and honesty vs. UX simplicity**. Option C is free
 
 **Not built / open:**
 - Real email delivery (simulated; Render's free tier blocks SMTP, so an HTTPS email API would be needed).
-- Persistence (SQLite resets on Render free tier; the roll is re-seeded at boot, everything else is lost).
+- ~~Persistence~~ Done (2026-10-02): the database is now PostgreSQL with committed migrations, and the election key is stored encrypted in the database. Verified locally against Postgres 16: after a full restart the key, election state, ballots and tally all survived.
 - Candidates as their own entity and multi-post RWA ballots (ADR-002). The demo has one post (President) with four candidates drawn from the roll.
 - Concurrency attack tests (parallel redemption/votes) and key-validation fuzzing were written but not run to completion; both paths rely on database unique constraints and transactions.
 
