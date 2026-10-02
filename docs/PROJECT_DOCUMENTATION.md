@@ -417,8 +417,7 @@ VoteSphere is a standalone web application consisting of:
 │ id: String (PK)             │
 │ ballotId: String (UK)       │  ◄── Public identifier
 │ electionId: String          │
-│ encryptedBallot: String     │  ◄── AES encrypted
-│ choiceId: String            │
+│ encryptedBallot: String     │  ◄── RSA-OAEP encrypted choice
 │ voterIdHash: String         │
 │ keyImage: String (UK)       │  ◄── LRS key image
 │ ringSize: Int               │
@@ -452,7 +451,7 @@ VoteSphere is a standalone web application consisting of:
 │  │ Layer 3: Cryptographic Voting                          │ │
 │  │ • Linkable Ring Signatures (anonymity)                │ │
 │  │ • Key Images (double-vote prevention)                 │ │
-│  │ • AES-256 ballot encryption                           │ │
+│  │ • RSA-OAEP-4096 ballot encryption                           │ │
 │  └────────────────────────────────────────────────────────┘ │
 │                          ▼                                   │
 │  ┌────────────────────────────────────────────────────────┐ │
@@ -522,7 +521,7 @@ VoteSphere is a standalone web application consisting of:
 |---------|-------------|------------|
 | **Linkable Ring Signatures** | Anonymous signing within a group | LRS library |
 | **Double Vote Prevention** | Unique key images detect duplicate votes | Key image uniqueness |
-| **End-to-End Encryption** | Ballot content encrypted | AES-256 |
+| **End-to-End Encryption** | Ballot content encrypted | RSA-OAEP-4096 |
 
 ### 7.2 User-Facing Features
 
@@ -631,7 +630,7 @@ Traditional voting faces a dilemma:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   🗳️  Anonymous Voting (LRS)
-  🔒  E2E Encryption (AES-256)
+  🔒  Encrypted ballots (RSA-OAEP)
   📜  Public Audit Ledger
   📱  QR Code Receipts
   📊  Admin Dashboard
