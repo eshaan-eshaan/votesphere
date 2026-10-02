@@ -227,9 +227,19 @@ const AdminDashboard = () => {
                 </button>
               )}
               {status === "REGISTRATION" && (
-                <button className="btn btn-primary" onClick={() => changePhase("VOTING")} disabled={!!busy || !canFreeze}>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => changePhase("VOTING")}
+                  disabled={!!busy || !canFreeze}
+                  title={canFreeze ? undefined : `Needs at least ${election?.minRingSize} registered keys (have ${counts?.registered ?? 0})`}
+                >
                   Freeze ring &amp; open voting
                 </button>
+              )}
+              {status === "REGISTRATION" && !canFreeze && (
+                <span className="text-sm" style={{ alignSelf: "center", color: "#fbbf24" }}>
+                  Waiting for voters to register keys: {counts?.registered ?? 0} of {election?.minRingSize} needed
+                </span>
               )}
               {status === "VOTING" && (
                 <button className="btn btn-primary" onClick={() => changePhase("CLOSED")} disabled={!!busy}>
